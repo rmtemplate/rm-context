@@ -2,8 +2,23 @@
   "name": "rm-context",
   "version": "0.3.0",
   "description": "Your Project Intelligence, Connected. A coordinated engineering team (Business Analyst, System Analyst, Project Manager, Senior Engineer, DevOps) on top of an evidence-backed project knowledge graph, professional documentation engine, Gantt planning and an offline project viewer.",
-  "author": { "name": "RM Template" },
+  "author": {
+    "name": "RM Template",
+    "url": "https://github.com/rmtemplate"
+  },
+  "homepage": "https://github.com/rmtemplate/rm-context",
+  "repository": "https://github.com/rmtemplate/rm-context",
   "license": "MIT",
   "icon": ".claude-plugin/icon.png",
-  "keywords": ["project-intelligence", "knowledge-graph", "business-analysis", "system-analysis", "project-management", "devops", "documentation", "gantt", "traceability"]
+  "keywords": [
+    "project-intelligence",
+    "knowledge-graph",
+    "business-analysis",
+    "system-analysis",
+    "project-management",
+    "devops",
+    "documentation",
+    "gantt",
+    "traceability"
+  ]
 }

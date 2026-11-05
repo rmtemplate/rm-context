@@ -8,205 +8,356 @@
 
 </div>
 
-**RM Context** is a Claude Code plugin by **RM Template**. It puts a coordinated engineering team inside Claude Code: a Business Analyst, System Analyst, Project Manager, Senior Engineer and DevOps Engineer. The team works from one evidence-backed **Project Intelligence Graph**, so you can go from a business idea to requirements, system design, a plan, implementation, infrastructure and delivery tracking. Every step is traceable to source code.
+**RM Context** gives Claude Code a full engineering team: a Business Analyst, System Analyst, Project Manager, Senior Engineer and DevOps Engineer. They all work from one knowledge graph of your project, built from your source code. You can take an idea through requirements, design, a plan, implementation and delivery tracking, and trace every step back to a file and line in your repository.
 
-- **Deterministic core.** A zero-dependency Node CLI (`rmc`) scans the repository incrementally, extracts routes, schemas, imports, services and pipelines with file and line evidence, and validates every write.
-- **Professional team.** Five role agents plus QA, Documentation, Quick Q&A and an Architecture analyst. They share IDs, hand-offs and one knowledge base instead of writing isolated documents.
-- **Documentation engine.** 49 templates (BRD, FSD, SIPOC, SRS, UML, ERD, API spec, WBS, Gantt, RAID, ADR, runbooks and more). Each has required sections, validation rules, versioning, an approval gate, and HTML/PDF/DOCX export.
-- **Evidence-based delivery.** `plan.json` drives the Gantt chart, critical path and health reports. Progress counts only completed work whose evidence exists in the repository.
-- **Offline viewer.** Knowledge graph, business, system, code, infrastructure and project views, plus search, filters, evidence links and impact highlighting.
+## Contents
+
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [Getting started](#getting-started)
+- [Usage guide](#usage-guide)
+- [Command reference](#command-reference)
+- [Configuration](#configuration)
+- [What gets created in your project](#what-gets-created-in-your-project)
+- [Security and privacy](#security-and-privacy)
+- [Troubleshooting](#troubleshooting)
+- [Limitations](#limitations)
 
 ## Requirements
 
 | | |
 |---|---|
-| Claude Code | a version with plugin support (built and verified on 2.1.318) |
-| Node.js | ≥ 18.17. The CLI uses only the standard library; there is nothing to `npm install` |
-| git | optional. It gives exact `.gitignore` handling and commit evidence |
-| Chrome / Chromium / Edge | optional, for PDF export (`RMC_CHROME` overrides detection) |
-| pandoc | optional, for DOCX export |
+| **Claude Code** | Required. Any version with plugin support |
+| **Node.js 18.17 or newer** | Required. There is nothing else to install |
+| git | Optional. Gives more accurate `.gitignore` handling and commit evidence |
+| Chrome, Chromium or Edge | Optional. Needed only for PDF export |
+| pandoc | Optional. Needed only for DOCX export |
 
 ## Installation
 
-**From a GitHub marketplace.** Push this repository to GitHub, then in Claude Code:
+In Claude Code, run:
 
 ```text
-/plugin marketplace add <github-owner>/rm-context
+/plugin marketplace add rmtemplate/rm-context
 /plugin install rm-context@rm-context-marketplace
 ```
 
-The marketplace manifest (`.claude-plugin/marketplace.json`) lists the plugin with `source: "./"`, so the repository is both the marketplace and the plugin.
+Restart Claude Code when prompted. Every command then starts with `/rm-context:`.
 
-**Local development.**
+To update later, run `/plugin marketplace update rm-context-marketplace` and then reinstall the plugin.
 
-```bash
-cd /path/to/your-project
-claude --plugin-dir /path/to/rm-context
-```
+## Getting started
 
-## Quick start
+Open Claude Code in the root folder of your project, then run:
 
 ```text
-/rm-context:init                     scan the repo into .rmcontext/ and write architecture notes
-/rm-context:viewer                   open the project viewer
-/rm-context:assess                   full existing-project assessment by the whole team
-/rm-context:feature <description>    BA → SA → plan → implement → QA → docs
-/rm-context:impact <id|file>         what does this change affect?
+/rm-context:init
 ```
 
-## Commands
+This scans the repository and writes a `.rmcontext/` folder into it. The folder holds:
+- the project graph: files, modules, APIs, database tables, dependencies, tests, containers and pipelines
+- a tech-stack summary
+- architecture notes
+- an interactive viewer
 
-**Core**
+Secrets are never read (see [Security and privacy](#security-and-privacy)).
 
-| Command | What it does |
+Open the viewer to see the result:
+
+```text
+/rm-context:viewer
+```
+
+As the project changes, keep the graph current:
+
+```text
+/rm-context:refresh
+```
+
+The refresh only re-reads changed files. Knowledge and documents linked to those files are flagged for review.
+
+## Usage guide
+
+### Understand an existing project
+
+```text
+/rm-context:assess
+```
+
+The whole team reviews the project in turn:
+- the Business Analyst infers business functionality from the code
+- the System Analyst maps APIs, data and integrations
+- the Senior Engineer reviews architecture and code quality
+- the DevOps Engineer reviews deployment and infrastructure
+- the Project Manager reports actual progress, based on evidence
+
+Add a focus to narrow it, e.g. `/rm-context:assess billing module`.
+
+For a single area or question:
+
+```text
+/rm-context:architecture how is authentication handled?
+/rm-context:find invoices
+```
+
+### Start a new project from an idea
+
+```text
+/rm-context:discover A booking platform for small clinics
+```
+
+The team works through the idea in order:
+1. **Business Analyst:** objectives, stakeholders, scope and business requirements.
+2. **System Analyst:** system requirements and data and API design.
+3. **Senior Engineer:** feasibility and the key technical decisions.
+4. **DevOps Engineer:** environments and deployment needs.
+5. **Project Manager:** the work breakdown, milestones and roadmap.
+
+When something can't be decided without you, the team stops and asks.
+
+### Build a feature end to end
+
+```text
+/rm-context:feature Customers can reset their password by email
+```
+
+The work runs in order:
+1. Requirements and acceptance criteria.
+2. Functional and technical design.
+3. An implementation plan based on what the change affects.
+4. Tasks in the project plan.
+5. **The team waits for your go-ahead.**
+6. Implementation, independent QA and document updates.
+7. The traceability matrix is updated.
+
+### Check what a change will affect
+
+```text
+/rm-context:impact BR-003
+/rm-context:impact src/services/billing.js
+/rm-context:impact --changed
+```
+
+`--changed` uses your uncommitted changes. The report lists everything affected: business requirements, modules, APIs, database tables, files, infrastructure, plan tasks and documents. It also says how confident each link is.
+
+### Work with one role directly
+
+Ask a specific role for a specific deliverable:
+
+```text
+/rm-context:ba Write the BRD for customer onboarding
+/rm-context:sa Design the API for BR-001 and BR-002
+/rm-context:pm Plan the registration feature
+/rm-context:engineering Write an implementation plan for the payment retry logic
+/rm-context:devops Write a deployment runbook for production
+```
+
+### Create documents
+
+Use a shortcut for common documents:
+
+```text
+/rm-context:fsd Registration
+/rm-context:srs Patient portal
+/rm-context:erd
+/rm-context:sipoc Order fulfilment
+/rm-context:adr Use PostgreSQL instead of MySQL
+/rm-context:roadmap 2027
+```
+
+Any of the 49 templates is available through `/rm-context:document <type> <title>`, e.g. `/rm-context:document raid-log Release 1`.
+
+| Area | Templates |
 |---|---|
-| `/rm-context:init` | Scans the repository (secrets excluded), builds the graph, index, tech stack and viewer, then the architecture agent writes evidence-backed context notes (`--quick` skips the agent) |
-| `/rm-context:refresh` | Incremental refresh: re-reads only changed files, marks affected knowledge stale, flags documents for review, and has the documentation agent reconcile them |
-| `/rm-context:status` | Freshness, graph coverage, documents, plan and validation summary |
-| `/rm-context:find` | Searches graph nodes (with evidence), documents and context notes |
-| `/rm-context:graph` | Builds and opens the knowledge graph view |
-| `/rm-context:viewer` | Builds and opens the full project viewer |
-| `/rm-context:link` | Registers another initialized repository as a reference project |
-| `/rm-context:routing` | Shows or changes which model each agent uses |
+| Business | brd, fsd, sipoc, process-flow, stakeholder-analysis, use-case, user-story, acceptance-criteria, rtm, business-rules, gap-analysis, scope |
+| System | srs, sdd, uml, erd, api-spec, data-dictionary, integration-spec |
+| Project management | project-charter, wbs, gantt, roadmap, sprint-plan, raid-log, raci, status-report, release-plan, change-log |
+| Engineering | technical-design, adr, code-review, tech-debt, test-strategy, test-cases, implementation-plan, refactoring-plan, engineering-standards |
+| Infrastructure | infrastructure-design, deployment-architecture, cicd-spec, env-matrix, runbook, backup-recovery, security-checklist, deployment-checklist, rollback-plan, monitoring, incident-report |
 
-**Professional teams**
+**How documents work:**
+- Documents are saved in `.rmcontext/documents/`. Each has an ID (e.g. `FSD-001`), a version, an author and a status: Draft, Under Review, Approved, Superseded or Archived.
+- Some documents start pre-filled from your code or plan: ERD, API spec, data dictionary, RTM, infrastructure, CI/CD, environment matrix, RAID, WBS, Gantt and roadmap.
+- Statements that can't be proven from the code are labelled **Confirmed**, **Assumption**, **Open Question** or **Recommendation**.
+- Editing a document keeps the previous version in its history.
 
-| Command | Agent | Deliverables |
-|---|---|---|
-| `/rm-context:ba` | Business Analyst | BRD, FSD, SIPOC, process flows, stakeholder analysis, use cases, user stories, acceptance criteria, business rules, gap analysis, scope |
-| `/rm-context:sa` | System Analyst | SRS, system design, UML, ERD, API spec, data dictionary, integration spec |
-| `/rm-context:pm` | Project Manager | charter, WBS, Gantt, roadmap, sprint plan, RAID, RACI, status report, release plan, change log |
-| `/rm-context:engineering` | Senior Engineer | technical design, ADR, implementation plan, implementation, code review, refactoring plan, tech debt, test strategy, standards |
-| `/rm-context:devops` | DevOps Engineer | infrastructure architecture, deployment, CI/CD, env matrix, runbook, backup/DR, monitoring, security and deployment checklists, rollback plan, incident report |
+**Approving.** Agents never approve documents. To approve one, say so in chat, e.g. *"Approve FSD-001, approved by Jane Doe"*. Editing an approved document sends it back to Under Review.
 
-**Workflows**
+**Exporting.** Ask in chat, e.g. *"Export FSD-001 as PDF"*. Formats are HTML, PDF and DOCX. Exports are saved in `.rmcontext/documents/exports/`.
 
-| Command | Flow |
+### Plan and track delivery
+
+```text
+/rm-context:pm Plan the MVP
+/rm-context:gantt
+/rm-context:project-health
+/rm-context:rtm
+```
+
+- **The plan** is saved in `.rmcontext/project-management/plan.json` and holds tasks, milestones, dependencies and sprints.
+- **Dates are never invented.** A date stays `TBD` until you provide it.
+- **The Gantt chart** shows the hierarchy, dependencies, milestones, a today line, planned vs actual dates and the critical path, with status filters. It is saved as SVG and interactive HTML.
+- **Progress** counts only completed tasks whose evidence exists in the repository: files, tests or commits. It is reported as *verified*, *reported* and *planned*, and is never calculated from elapsed time.
+- **`/rm-context:project-health`** gives a red/amber/green report from explicit rules. Add `save` to keep the report.
+- **`/rm-context:rtm`** shows which requirements are implemented and tested. Add `save` to create an RTM document with a gap analysis.
+
+### Review code
+
+```text
+/rm-context:review
+/rm-context:review src/payments
+```
+
+With no argument, it reviews your uncommitted changes. You can also give a path, module or branch.
+
+### Explore with the viewer
+
+`/rm-context:viewer` opens one HTML file that works offline. It has these views:
+- **Overview**
+- **Knowledge graph**
+- **Business:** requirements, processes, use cases
+- **System:** modules, APIs, data
+- **Code:** files, classes, functions, tests
+- **Infrastructure:** containers, services, pipelines
+- **Project:** plan and Gantt
+- **Documents**
+
+You can search, filter by type and by confidence, and zoom and pan. Click any item to see its details and source evidence, open the file in VS Code, or highlight everything it affects. `/rm-context:graph` opens the graph view directly.
+
+The viewer is a snapshot. Run `/rm-context:viewer` again after a refresh.
+
+### Connect related repositories
+
+```text
+/rm-context:link ../billing-service
+```
+
+This registers another repository as a reference project, so the team can follow cross-project relationships. The other repository must have been initialised with `/rm-context:init`.
+
+## Command reference
+
+| Command | Purpose |
 |---|---|
-| `/rm-context:discover` | A: new project discovery. BA → SA → Engineer (feasibility) → DevOps → PM |
-| `/rm-context:feature` | B: feature development. BA → SA → Engineer plan → PM tasks → *your go-ahead* → implement → QA → docs → RTM |
-| `/rm-context:assess` | C: existing project assessment. Scan → BA → SA → Engineer review ∥ DevOps → PM progress from evidence |
-| `/rm-context:impact` | D: change impact. Requirements, modules, APIs, tables, files, infrastructure, tasks and documents affected |
+| `/rm-context:init` | Scan the project and set up `.rmcontext/`. `--quick` skips the architecture write-up |
+| `/rm-context:refresh` | Update the graph from changed files. `--full` rescans everything |
+| `/rm-context:status` | Freshness, coverage, documents, plan and validation summary |
+| `/rm-context:find` | Search the graph, documents and notes |
+| `/rm-context:graph` | Open the knowledge graph |
+| `/rm-context:viewer` | Open the full project viewer |
+| `/rm-context:link` | Register a related repository |
+| `/rm-context:routing` | Show or change which model each agent uses |
+| `/rm-context:discover` | New project discovery |
+| `/rm-context:feature` | Feature development, end to end |
+| `/rm-context:assess` | Existing project assessment |
+| `/rm-context:impact` | Change impact analysis |
+| `/rm-context:ba` | Business Analyst |
+| `/rm-context:sa` | System Analyst |
+| `/rm-context:pm` | Project Manager |
+| `/rm-context:engineering` | Senior Engineer |
+| `/rm-context:devops` | DevOps Engineer |
+| `/rm-context:document` | Any document template |
+| `/rm-context:fsd` | Functional Specification |
+| `/rm-context:sipoc` | SIPOC diagram |
+| `/rm-context:srs` | Software Requirements Specification |
+| `/rm-context:erd` | Entity relationship diagram |
+| `/rm-context:adr` | Architecture Decision Record |
+| `/rm-context:roadmap` | Roadmap |
+| `/rm-context:rtm` | Requirement Traceability Matrix |
+| `/rm-context:gantt` | Gantt chart |
+| `/rm-context:review` | Code review |
+| `/rm-context:architecture` | Architecture analysis |
+| `/rm-context:project-health` | Project health report |
 
-**Documentation and analysis**
+## Configuration
 
-| Command | Output |
+Project settings live in `.rmcontext/config.json`.
+
+### Models per agent
+
+| Agent | Default model |
 |---|---|
-| `/rm-context:document` | Any template from the catalog, routed to its owning agent |
-| `/rm-context:fsd` · `/rm-context:sipoc` · `/rm-context:srs` · `/rm-context:erd` · `/rm-context:adr` · `/rm-context:roadmap` | The named document |
-| `/rm-context:rtm` | Requirement Traceability Matrix from the graph (`save` creates a document with gap analysis) |
-| `/rm-context:gantt` | Gantt SVG and interactive HTML: hierarchy, dependencies, milestones, today line, planned vs actual, status filters, critical path |
-| `/rm-context:review` | Engineering review of a change set or area |
-| `/rm-context:architecture` | Architecture analysis grounded in evidence |
-| `/rm-context:project-health` | RAG health report from explicit rules and repository evidence |
+| business-analyst, system-analyst, senior-engineer, devops-engineer, architecture | Opus |
+| project-manager, qa, documentation | Sonnet |
+| quick-qa | Haiku |
 
-## How the team collaborates
+To change a model, edit `models`, or ask `/rm-context:routing` to do it:
 
-Agents never pass work through free text alone. They share:
-- **IDs:** BR-001 → UC-001 → SR-001 → `api:POST /users` → `file:src/routes/users.js` → `test:…` → T-004.
-- **The graph:** `rmc graph upsert`, which validates every write.
-- **Hand-offs:** `rmc handoff add`, carrying summary, artifacts, assumptions and open questions.
+```json
+{ "models": { "project-manager": "opus", "qa": "inherit" } }
+```
 
-Every non-verified statement is classified as **Confirmed**, **Assumption**, **Open Question** or **Recommendation**. The validator enforces the `Basis` column on BA and SA requirement tables. No agent can approve a document: approval needs `--approved-by`, and agents are instructed to use it only when you explicitly approve.
+Valid values:
+- `opus`, `sonnet` or `haiku`
+- a full `claude-…` model id
+- `inherit`, which uses your current session model
 
-The main session orchestrates. It delegates one role per step, passes the routed model, and runs roles in parallel only when their steps are independent. See [`skills/team-workflows/SKILL.md`](skills/team-workflows/SKILL.md).
+If a model isn't available on your account, the agent falls back to your session model. Agent models never change your main session model; use `/model` for that.
 
-## Model routing
+### Excluding files
 
-| Agent | Default | Why |
-|---|---|---|
-| business-analyst, system-analyst, senior-engineer, devops-engineer, architecture | Opus | complex analysis and decisions |
-| project-manager, qa, documentation | Sonnet | planning, verification, structured writing |
-| quick-qa | Haiku | lightweight retrieval |
+Add gitignore-style patterns in either place:
 
-To override per project, edit `.rmcontext/config.json`, e.g. `{ "models": { "project-manager": "opus", "qa": "inherit" } }`. Values are the aliases `opus`, `sonnet` or `haiku`, a full `claude-…` id, or `inherit`, meaning the main session's model.
+```json
+{ "ignore": ["legacy/**", "*.generated.ts"], "maxFileBytes": 1000000 }
+```
 
-Commands pass the routed model when delegating. If that model is unavailable, they retry with the main session's model. **A subagent's model never changes your main session's model.** Use `/model` for that.
+You can also put patterns in a `.rmcontextignore` file at the project root. Files larger than `maxFileBytes` are skipped.
 
-## Generated structure
+## What gets created in your project
 
 ```text
 .rmcontext/
-├── manifest.json  config.json  INDEX.md  .gitignore
-├── context/              tech-stack.md (generated) · overview, architecture, conventions, business-rules (agents)
-├── business/ system/ engineering/ infrastructure/
-├── documents/            registry.json · <layer>/<ID>-<slug>.md · .history/ · exports/
-├── project-management/   plan.json · gantt.svg · gantt.html · impact and health reports
-├── templates/            optional project template overrides
-├── graph/                nodes.json · edges.json
-├── flows/  references/
-├── viewer/               index.html · graph.html
-├── state/                scan.json · handoffs.jsonl · files.json (local cache)
-└── .local/               machine-local paths (git-ignored)
+├── INDEX.md              start here: a short map of the project
+├── config.json           your settings
+├── context/              tech stack, overview, architecture, conventions
+├── documents/            all documents, their history and exports
+├── project-management/   plan.json, Gantt chart, impact and health reports
+├── graph/                the knowledge graph
+├── viewer/               index.html: open it in any browser
+└── state/, .local/       scan state and machine-local data
 ```
 
-Commit `.rmcontext/`. Its own `.gitignore` keeps the machine-local cache and paths out. Full schemas are in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+Commit `.rmcontext/` so your team shares the same context. Its own `.gitignore` keeps machine-specific files out.
 
-## Knowledge graph
+You can add your own notes to `INDEX.md` and the context files. Refreshes only replace the sections the plugin generated.
 
-There are 38 node types across five layers:
-- **business:** stakeholder, requirement, process, rule, use case, user story
-- **system:** system, module, feature, requirement, API, database, table, entity, integration
-- **engineering:** file, class, function, component, dependency, test
-- **infrastructure:** server, container, service, network, environment, deployment, pipeline
-- **project:** project, milestone, sprint, task, risk, issue, assumption, question, decision, document
+## Security and privacy
 
-There are 12 relationship types: `belongs_to implements depends_on calls reads_from writes_to integrates_with deployed_on tested_by satisfies blocks related_to`. Each relationship carries **evidence** (file, line range, evidence type) and a **confidence** of `verified` (literal source fact), `inferred` (heuristic) or `manual` (stated by a person).
+- **Never read or indexed:**
+  - `.env` files. Templates such as `.env.example` are read for variable names only.
+  - Private keys and certificates.
+  - Credential and service-account files, `.npmrc` and `.netrc`.
+  - Terraform state and variables.
+  - Database dumps and backups.
+- **Skipped:** dependencies, build output, caches and binary files.
+- **Respected:** your `.gitignore`, `.rmcontextignore` and `config.json` ignore patterns.
+- **Blocked:** generated documents and graph data that contain secret-like content, such as keys, tokens, or passwords in connection strings, are refused.
+- Your own text is never overwritten without your confirmation.
+- Documents are only approved when you say so.
 
-**Scanner coverage:**
-- **JS/TS:** Express-style routes and Next.js routes; Prisma and SQL table use; outbound HTTP
-- **PHP/Laravel:** routes with controller handlers via PSR-4; Eloquent models; migrations with columns and foreign keys
-- **Python:** Flask/FastAPI/Django routes; SQLAlchemy/Django models
-- **Go:** gin/echo/net-http routes
-- **Java/Kotlin:** Spring mappings and JPA
-- **Ruby:** Rails routes and models
-- **C#:** ASP.NET attributes
-- **Schemas:** SQL and Prisma
-- **Packages:** npm, Composer, pip/pyproject, Go modules, Gems, Cargo
-- **Infrastructure:** Dockerfile, Compose, GitHub/GitLab/other CI, Kubernetes, Terraform, nginx; env-template variable **names**
+## Troubleshooting
 
-## Security
-
-- **Never read or indexed:** `.env*` (except example templates, and those for names only), private keys and certificates, `.npmrc`/`.pypirc`/`.netrc`, credential and service-account files, tfstate/tfvars, database dumps and backups. Dependency, build, cache and binary files are skipped.
-- `.gitignore` (all of them, via git), `.rmcontextignore` and `config.ignore` patterns are respected.
-- Graph writes and document validation **reject secret-like content**: private keys, cloud and VCS tokens, JWTs, passwords in connection strings, and credential assignments.
-- Generated content is wrapped in markers, so user-authored text is never overwritten. `rmc doc new` refuses to overwrite files.
-- Machine-specific absolute paths stay in the git-ignored `.local/`.
+| Problem | Fix |
+|---|---|
+| "RM Context is not initialized" | Run `/rm-context:init` in the project root |
+| Results look outdated | Run `/rm-context:refresh`. For a clean rebuild, run `/rm-context:refresh --full` |
+| PDF export fails | Install Chrome, Chromium or Edge, or set `RMC_CHROME` to the browser's path |
+| DOCX export fails | Install [pandoc](https://pandoc.org/installing.html) |
+| Mermaid diagrams don't render in HTML exports | The page needs internet access to load Mermaid. Offline, diagrams are shown as source |
+| An agent reports a model is unavailable | Set that agent to `inherit` with `/rm-context:routing` |
+| Node.js not found | Install Node.js 18.17 or newer and restart Claude Code |
 
 ## Limitations
 
-- The extractors are regex-based, not AST-based. They miss dynamic or computed routes, router mount prefixes (`app.use('/api', router)`) and route groups, reflection, runtime registration and macros. Function-level `calls` edges are inferred from imported names only.
-- Modules are inferred from directory structure. Features, business intent, planned design and infrastructure intent come from agents, not the scanner.
-- The viewer is a static snapshot. Re-run `/rm-context:viewer` after changes. It is designed for graphs up to a few thousand nodes.
-- Mermaid diagrams in HTML exports render only when the page can reach jsDelivr. PDF needs a Chromium-family browser and DOCX needs pandoc. The CLI reports clearly when one is missing.
-- Model availability depends on your Claude Code version and account.
+- **Pattern-based scanning.** Code is scanned with pattern matching, not full parsing. Some routes are missed: dynamic routes, router prefixes such as `app.use('/api', router)`, route groups, and runtime registration. Links the scanner guesses are marked *inferred*.
+- **Business knowledge comes from the agents.** Business intent, planned designs and features are written by the agents, not detected in code.
+- **The viewer works best up to a few thousand items.**
 
-## Upgrading from 0.2.0
-
-- Existing `.rmcontext/` folders are migrated on the next `rmc refresh`. Legacy node and edge types are mapped (`reads`→`reads_from`, `contains`→`belongs_to`, `external_service`→`integration`, …), and nothing is dropped.
-- The `coding` agent is now `senior-engineer`. All 0.2.0 commands keep their names.
-- The root `marketplace.json` duplicate was removed. Use `.claude-plugin/marketplace.json`.
-
-## Development
-
-```bash
-npm test               # 31 tests: scanner, security exclusions, incremental refresh, graph rules, documents, plan/Gantt, viewer, plugin structure
-npm run validate       # claude plugin validate --strict for the manifest, agents, skills and commands
-node scripts/rmc.mjs help
-```
-
-To regenerate `.claude-plugin/icon.png` after editing `assets/icon.svg`, render it at 512×512 with a transparent background:
-
-```bash
-chrome --headless=new --default-background-color=00000000 --window-size=512,512 --screenshot=.claude-plugin/icon.png assets/icon-render.html
-```
-
-Further reading:
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): schemas and contracts
-- [docs/PRODUCT_AUDIT.md](docs/PRODUCT_AUDIT.md): audit and phases
-- [docs/IMPLEMENTATION_CHECKLIST.md](docs/IMPLEMENTATION_CHECKLIST.md): status
-- [docs/BRANDING.md](docs/BRANDING.md): brand guidelines
-- [CHANGELOG.md](CHANGELOG.md): release notes
+**Supported stacks:**
+- **Languages and frameworks:** JavaScript/TypeScript (Express-style, Next.js, Prisma), PHP/Laravel, Python (Flask, FastAPI, Django, SQLAlchemy), Go, Java/Kotlin (Spring, JPA), Ruby on Rails and C# (ASP.NET)
+- **Schemas:** SQL and Prisma
+- **Package files:** npm, Composer, pip, Go modules, Bundler and Cargo
+- **Infrastructure:** Docker, Compose, CI pipelines, Kubernetes, Terraform and nginx
 
 ## License
 

@@ -27,7 +27,6 @@ Evolves RM Context from a prompt-only codebase-notes plugin into a project-intel
 - **Model routing:** `config/models.json` defaults, per-project overrides in `.rmcontext/config.json`, and fallback to the main session model.
 - **SessionStart hook** exporting `RMC_CLI` for subagents.
 - **New brand identity:** an R drawn as a graph, with logo, light/dark lockups, icon, banner and 512px PNG listing icon; `docs/BRANDING.md`.
-- **Tests:** 31 `node:test` tests, plus `claude plugin validate --strict` in the suite.
 
 ### Changed
 - `init`, `refresh`, `status`, `find`, `graph`, `viewer` and `link` now run real CLI operations instead of asking the model to generate artifacts. The viewer is no longer hand-written by the LLM on every call.
