@@ -187,6 +187,7 @@ These hooks exist only in Claude Code. Other platforms can run the same retrieva
   - For each file: symbols, imports and what they resolve to, importers, routes, tables, external calls, callers, callees, requirements, tests, documents and evidence.
   - Every relationship is labelled **Extracted** (read from source) or **Inferred** (a heuristic to verify).
 - **Explorers:** Modules, Functions & Classes, Dependencies, APIs, Database, Infrastructure, Integrations and Business Requirements, plus Technical Documents, Project Management (Gantt), Agent Handoffs, Notes, Search, Context Status and Settings.
+- **Documents and notes are rendered in the viewer:** headings, tables, code blocks and **Mermaid diagrams**. ERDs, flowcharts, sequence diagrams and Gantt charts all render offline. Mermaid (MIT) is bundled with the plugin and added to the viewer only when a document or note contains a diagram, which adds about 3.3 MB.
 - **Graph views:** Project, Module, File dependency, Function call, API, Database, Infrastructure, Traceability and Everything.
 - **Graph tools:**
   - Find in graph, type filters and provenance filters.

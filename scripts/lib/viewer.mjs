@@ -14,7 +14,7 @@ const NOTE_DIRS = ['context', 'business', 'system', 'engineering', 'infrastructu
 const FILE_KEYS = ['lang', 'loc', 'test', 'imports', 'decls', 'routes', 'dbUses', 'http', 'tables'];
 
 // Drop any line that looks like a credential before it is embedded.
-const clean = (s) => String(s ?? '').split('\n').filter((l) => !findSecrets(l).length).join('\n');
+const clean = (s) => String(s ?? '').replace(/^﻿/, '').split('\n').filter((l) => !findSecrets(l).length).join('\n');
 
 function notes(c) {
   const out = [];
@@ -71,7 +71,11 @@ export function buildViewer(c) {
   }));
   const data = {
     generatedAt: now(), manifest, layers: G.LAYERS, propagation: G.PROPAGATION, stats: G.stats(g), graph: { nodes, edges },
-    documents: reg.documents.map(({ id, title, type, status, version, author, updatedAt, path: p, nodes: ns, sources, needsReview }) => ({ id, title, type, status, version, author, updatedAt, path: p, nodes: ns, sources, needsReview })),
+    documents: reg.documents.map(({ id, title, type, status, version, author, updatedAt, path: p, nodes: ns, sources, needsReview }) => {
+      const f = c.p(p);
+      const text = fs.existsSync(f) ? clean(fs.readFileSync(f, 'utf8')) : '';
+      return { id, title, type, status, version, author, updatedAt, path: p, nodes: ns, sources, needsReview, text: text.slice(0, 120000), truncated: text.length > 120000 || undefined };
+    }),
     rtm: G.rtm(g).map((r) => ({ id: r.requirement.id, status: r.status })),
     plan, progress: plan ? progress(c, plan) : null, critical: plan && !plan.invalid ? criticalPath(plan).path : [],
     files: files(c), handoffs, notes: notes(c), autoContext: contextStatus(c),
@@ -80,12 +84,12 @@ export function buildViewer(c) {
   const core = read('graph-core.mjs').replace(/^export /gm, '');
   // Escape "<" so embedded data and code can never close the script element.
   const json = JSON.stringify(data).replace(/</g, '\\u003c');
-  const html = read('template.html')
-    .replace('/*__CSS__*/', () => compiledCss())
-    .replace('/*__RMC_DATA__*/null', () => json)
-    .replace('/*__GANTT__*/null', () => renderGanttSvg.toString())
-    .replace('/*__CORE__*/', () => core)
-    .replace('/*__APP__*/', () => read('app.js'));
+  // Mermaid (vendored, MIT) is embedded only when a document or note has a diagram, and evaluated only when one is shown.
+  const hasMermaid = [...data.documents, ...data.notes].some((x) => /```mermaid/.test(x.text));
+  const mermaid = hasMermaid ? JSON.stringify(read('vendor/mermaid.min.js')).replace(/</g, '\\u003c') : 'null';
+  // One pass over the template: inserted content is never re-scanned for placeholders.
+  const parts = { CSS: compiledCss, RMC_DATA: () => json, GANTT: () => renderGanttSvg.toString(), CORE: () => core, APP: () => read('app.js'), MERMAID: () => mermaid };
+  const html = read('template.html').replace(/\/\*__(CSS|RMC_DATA|GANTT|CORE|APP|MERMAID)__\*\/(?:null)?/g, (_, k) => parts[k]());
   writeFile(c.viewer, html);
   writeFile(path.join(path.dirname(c.viewer), 'graph.html'), '<!doctype html><meta charset="utf-8"><title>RM Context graph</title><meta http-equiv="refresh" content="0;url=index.html#/graph"><a href="index.html#/graph">Open graph</a>\n');
   return c.viewer;

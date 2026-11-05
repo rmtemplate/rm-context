@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.1 — 2026-11-06
+
+### Added
+- **Document reader in the viewer.** Technical documents open inside the viewer instead of as raw Markdown.
+- **Mermaid diagrams render offline.** ERDs, flowcharts, sequence diagrams and Gantt charts render in documents and notes. Mermaid 10.9.1 (MIT) is vendored with the plugin and embedded only when a diagram exists; it is evaluated only when a diagram is shown.
+- Notes and documents render tables, ordered lists, quotes and code blocks.
+
+### Fixed
+- Notes saved with a UTF-8 BOM showed their first heading as plain text.
+- The generator version recorded in manifests now matches the plugin version.
+
 ## 0.4.0 — 2026-11-06
 
 ### Added

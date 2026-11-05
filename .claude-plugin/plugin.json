@@ -1,6 +1,6 @@
 {
   "name": "rm-context",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Your Project Intelligence Layer for AI Coding Agents. Claude Code integration for RM Context: BA, SA, PM, Senior Engineer and DevOps agents with adaptive model routing, on an evidence-backed project knowledge graph, documentation engine, Gantt planning and an offline viewer.",
   "author": {
     "name": "RM Template",

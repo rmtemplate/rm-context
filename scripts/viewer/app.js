@@ -371,7 +371,7 @@ function fileInfo(p) {
    ${section('Evidence', evidence.length ? evidence.map(evRow).join('') : '<p class="text-muted text-2xs">No evidence recorded.</p>', evidence.length)}
    </div></div>`;
 }
-const docRow = (d) => `<div class="flex items-center gap-2 px-2 py-1">${icon('doc', 'w-3.5 h-3.5 text-l-project')}<a href="../${esc(d.path)}" class="truncate flex-1">${esc(d.id)} · ${esc(d.title)}</a><span class="badge">${esc(d.status)}</span>${d.needsReview ? '<span class="badge b-stale">needs review</span>' : ''}</div>`;
+const docRow = (d) => `<div class="flex items-center gap-2 px-2 py-1">${icon('doc', 'w-3.5 h-3.5 text-l-project')}<a href="${href('documents', '', { d: d.id })}" class="truncate flex-1">${esc(d.id)} · ${esc(d.title)}</a><span class="badge">${esc(d.status)}</span>${d.needsReview ? '<span class="badge b-stale">needs review</span>' : ''}</div>`;
 function evLinks(e) {
   if (!e.file) return '';
   const rel = '../../' + e.file.split('/').map(encodeURIComponent).join('/');
@@ -408,11 +408,21 @@ function drawList(route) {
 }
 
 // ---------- documents, project, handoffs, notes ----------
-function drawDocuments() {
+function drawDocument(d) {
+  showPage(`<a href="#/documents" class="inline-flex items-center gap-1 text-2xs mb-3">${icon('back', 'w-3.5 h-3.5')}All documents</a>
+   ${header(`${esc(d.id)} · ${esc(d.title)}`, `${esc(d.type)} · v${esc(d.version)} · ${esc(d.author || '')} · updated ${esc((d.updatedAt || '').slice(0, 10))}`, `<div class="flex flex-wrap items-center gap-2"><span class="badge">${esc(d.status)}</span>${d.needsReview ? '<span class="badge b-stale">needs review</span>' : ''}<a class="btn no-underline hover:no-underline" href="../${esc(d.path)}" target="_blank" rel="noopener">${icon('external')}Markdown file</a></div>`)}
+   ${(d.nodes || []).length ? `<div class="flex flex-wrap gap-1 mb-4">${d.nodes.map((x) => (IDX.has(x) ? `<button class="chip" data-node="${esc(x)}">${layerDot(NODES[IDX.get(x)].type)}${esc(shortName(NODES[IDX.get(x)]))}</button>` : `<span class="chip">${esc(x)}</span>`)).join('')}</div>` : ''}
+   <article class="card p-5 sm:p-7 max-w-4xl">${d.text ? md(d.text) : '<p class="text-muted">The document file was not found when the viewer was built.</p>'}${d.truncated ? '<p class="text-2xs text-muted mt-4">Truncated in the viewer; open the Markdown file for the rest.</p>' : ''}</article>`);
+  bindLinks(page());
+  renderMermaid(page());
+}
+function drawDocuments(route) {
   if (!DOCS.length) return showPage(header('Technical Documents') + empty('No documents yet. Create one with <code>/rm-context:document</code>.'));
+  const open = route?.params.get('d') && DOCS.find((d) => d.id === route.params.get('d'));
+  if (open) return drawDocument(open);
   const types = [...new Set(DOCS.map((d) => d.type))].sort();
   showPage(`${header('Technical Documents', `${DOCS.length} registered. A document becomes Approved only with explicit user approval; approved documents are flagged for review, never rewritten.`, `<select id="dt" class="input w-auto" aria-label="Type"><option value="">All types</option>${types.map((t) => `<option>${esc(t)}</option>`).join('')}</select>`)}<div class="card overflow-x-auto"><table class="tbl min-w-[720px]"><thead><tr><th>ID</th><th>Title</th><th>Type</th><th>Status</th><th>Version</th><th>Author</th><th>Updated</th><th>Linked</th></tr></thead><tbody id="dl"></tbody></table></div>`);
-  const draw = () => { const t = $('#dt').value; $('#dl').innerHTML = DOCS.filter((d) => !t || d.type === t).map((d) => `<tr><td class="whitespace-nowrap"><a href="../${esc(d.path)}">${esc(d.id)}</a></td><td>${esc(d.title)}${d.needsReview ? ' <span class="badge b-stale">needs review</span>' : ''}</td><td>${esc(d.type)}</td><td><span class="badge">${esc(d.status)}</span></td><td>v${esc(d.version)}</td><td>${esc(d.author)}</td><td class="whitespace-nowrap">${esc((d.updatedAt || '').slice(0, 10))}</td><td>${(d.nodes || []).slice(0, 4).map((x) => (IDX.has(x) ? `<button class="text-accent" data-node="${esc(x)}">${esc(shortName(NODES[IDX.get(x)]))}</button>` : esc(x))).join(', ') || '—'}</td></tr>`).join(''); bindLinks($('#dl')); };
+  const draw = () => { const t = $('#dt').value; $('#dl').innerHTML = DOCS.filter((d) => !t || d.type === t).map((d) => `<tr><td class="whitespace-nowrap"><a href="${href('documents', '', { d: d.id })}">${esc(d.id)}</a></td><td><a href="${href('documents', '', { d: d.id })}" class="text-fg">${esc(d.title)}</a>${d.needsReview ? ' <span class="badge b-stale">needs review</span>' : ''}</td><td>${esc(d.type)}</td><td><span class="badge">${esc(d.status)}</span></td><td>v${esc(d.version)}</td><td>${esc(d.author)}</td><td class="whitespace-nowrap">${esc((d.updatedAt || '').slice(0, 10))}</td><td>${(d.nodes || []).slice(0, 4).map((x) => (IDX.has(x) ? `<button class="text-accent" data-node="${esc(x)}">${esc(shortName(NODES[IDX.get(x)]))}</button>` : esc(x))).join(', ') || '—'}</td></tr>`).join(''); bindLinks($('#dl')); };
   $('#dt').onchange = draw; draw();
 }
 function drawProject() {
@@ -434,18 +444,52 @@ function drawHandoffs() {
   showPage(`${header('Agent Handoffs', `${H.length} recorded, newest first.`)}<div class="space-y-3">${H.map((h) => `<article class="card p-4"><div class="flex flex-wrap items-center gap-2 text-2xs text-muted"><span class="badge font-mono">${esc(h.id)}</span><b class="text-fg">${esc(h.from)}</b>${icon('right', 'w-3 h-3')}<b class="text-fg">${esc(h.to)}</b>${h.workflow ? `<span class="badge">${esc(h.workflow)}</span>` : ''}<span class="ml-auto">${esc((h.at || '').replace('T', ' ').slice(0, 16))}</span></div><p class="mt-2">${esc(h.summary)}</p>${li('Decisions', h.decisions)}${li('Assumptions', h.assumptions)}${li('Open questions', h.openQuestions)}${li('Artifacts', h.artifacts)}${(h.nodes || []).length ? `<div class="flex flex-wrap gap-1 mt-2">${h.nodes.map((x) => (IDX.has(x) ? `<button class="chip" data-node="${esc(x)}">${esc(shortName(NODES[IDX.get(x)]))}</button>` : `<span class="chip">${esc(x)}</span>`)).join('')}</div>` : ''}</article>`).join('')}</div>`);
   bindLinks(page());
 }
+// Small Markdown renderer for notes and documents: headings, lists, tables, quotes, code fences and Mermaid blocks.
+const inline = (s) => esc(s).replace(/`([^`]+)`/g, '<code class="px-1 rounded bg-raised">$1</code>').replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>').replace(/(^|[^*])\*([^*\s][^*]*)\*/g, '$1<i>$2</i>');
 function md(text) {
-  const out = []; let list = false;
-  for (const raw of String(text).split('\n')) {
-    const l = raw.trimEnd();
-    const h = /^(#{1,4})\s+(.*)$/.exec(l), li = /^\s*[-*]\s+(.*)$/.exec(l);
-    if (!li && list) { out.push('</ul>'); list = false; }
-    if (h) out.push(`<h${Math.min(4, h[1].length + 1)} class="font-semibold ${h[1].length === 1 ? 'text-base' : ''} mt-3 mb-1">${esc(h[2])}</h${Math.min(4, h[1].length + 1)}>`);
-    else if (li) { if (!list) { out.push('<ul class="list-disc pl-5 space-y-0.5">'); list = true; } out.push(`<li>${esc(li[1])}</li>`); }
-    else if (l) out.push(`<p class="my-1">${esc(l)}</p>`);
+  const out = [], lines = String(text).replace(/<!--[\s\S]*?-->/g, '').split('\n');
+  let list = null;
+  const closeList = () => { if (list) { out.push(`</${list}>`); list = null; } };
+  for (let k = 0; k < lines.length; k++) {
+    const l = lines[k].trimEnd();
+    const fence = /^\s*```\s*([\w-]*)/.exec(l);
+    if (fence) {
+      closeList();
+      const buf = []; while (++k < lines.length && !/^\s*```\s*$/.test(lines[k])) buf.push(lines[k]);
+      out.push(fence[1] === 'mermaid' ? `<div class="card p-3 my-3 overflow-x-auto"><pre class="mermaid text-[12px] text-muted whitespace-pre" data-src="${esc(buf.join('\n'))}">${esc(buf.join('\n'))}</pre></div>` : `<pre class="card p-3 my-3 overflow-x-auto font-mono text-[12px] whitespace-pre">${esc(buf.join('\n'))}</pre>`);
+      continue;
+    }
+    if (/^\s*\|.*\|\s*$/.test(l)) {
+      closeList();
+      const rows = []; for (; k < lines.length && /^\s*\|.*\|\s*$/.test(lines[k]); k++) rows.push(lines[k].trim().slice(1, -1).split('|').map((c) => c.trim()));
+      k--;
+      const sep = rows[1] && rows[1].every((c) => /^:?-{2,}:?$/.test(c));
+      const head = sep ? rows[0] : null, body = sep ? rows.slice(2) : rows;
+      out.push(`<div class="overflow-x-auto my-3"><table class="tbl">${head ? `<thead><tr>${head.map((c) => `<th>${inline(c)}</th>`).join('')}</tr></thead>` : ''}<tbody>${body.map((r) => `<tr>${r.map((c) => `<td>${inline(c)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`);
+      continue;
+    }
+    const h = /^(#{1,6})\s+(.*)$/.exec(l), ul = /^\s*[-*+]\s+(.*)$/.exec(l), ol = /^\s*\d+[.)]\s+(.*)$/.exec(l), q = /^>\s?(.*)$/.exec(l);
+    if (!(ul || ol)) closeList();
+    if (h) { const lv = Math.min(4, h[1].length + 1); out.push(`<h${lv} class="font-semibold ${h[1].length === 1 ? 'text-lg' : h[1].length === 2 ? 'text-base mt-5' : 'mt-3'} mb-1.5">${inline(h[2])}</h${lv}>`); }
+    else if (ul || ol) { const t = ul ? 'ul' : 'ol'; if (list !== t) { closeList(); out.push(`<${t} class="${t === 'ul' ? 'list-disc' : 'list-decimal'} pl-5 space-y-0.5 my-1">`); list = t; } out.push(`<li>${inline((ul || ol)[1])}</li>`); }
+    else if (q) out.push(`<blockquote class="border-l-2 border-line pl-3 text-muted my-1">${inline(q[1])}</blockquote>`);
+    else if (/^\s*(-{3,}|\*{3,})\s*$/.test(l)) out.push('<hr class="border-line my-4">');
+    else if (l.trim()) out.push(`<p class="my-1.5">${inline(l)}</p>`);
   }
-  if (list) out.push('</ul>');
+  closeList();
   return out.join('');
+}
+// Mermaid is evaluated on first use only (it is large), then each diagram is rendered in the current theme.
+let mermaidReady = null;
+function renderMermaid(root) {
+  const nodes = $$('pre.mermaid', root);
+  if (!nodes.length) return;
+  if (!MERMAID_SRC) { nodes.forEach((n) => n.insertAdjacentHTML('beforebegin', '<div class="text-2xs text-warn mb-1">Mermaid is not embedded in this viewer; rebuild it with rmc viewer.</div>')); return; }
+  try { if (!mermaidReady) { (0, eval)(MERMAID_SRC); mermaidReady = window.mermaid; } } catch (e) { mermaidReady = null; return; }
+  const dark = document.documentElement.dataset.theme ? document.documentElement.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+  mermaidReady.initialize({ startOnLoad: false, securityLevel: 'strict', theme: dark ? 'dark' : 'default', fontFamily: 'Inter, "Segoe UI", system-ui, sans-serif' });
+  nodes.forEach((n) => { n.removeAttribute('data-processed'); n.textContent = n.dataset.src; });
+  mermaidReady.run({ nodes, suppressErrors: true }).catch(() => {}).finally(() => nodes.forEach((n) => { if (!n.querySelector('svg')) n.insertAdjacentHTML('beforebegin', '<div class="text-2xs text-danger mb-1">This diagram has a Mermaid syntax error; its source is shown.</div>'); else n.classList.remove('text-muted'); }));
 }
 function drawNotes(route) {
   const N = D.notes || [];
@@ -455,6 +499,7 @@ function drawNotes(route) {
   showPage(`${header('Notes', 'Context notes written by agents and users. Lines that look like credentials are removed when the viewer is built.')}
    <div class="flex flex-col md:flex-row gap-4"><nav class="card p-1 md:w-64 shrink-0 self-start w-full" aria-label="Notes">${N.map((x) => `<a href="${href('notes', '', { f: x.path })}" class="row rounded no-underline hover:no-underline text-fg ${x.path === note.path ? 'on' : ''}">${icon('note', 'icon text-faint')}<span class="truncate">${esc(x.title)}</span></a>`).join('')}</nav>
    <article class="card p-5 flex-1 min-w-0"><div class="text-2xs text-muted font-mono mb-2">.rmcontext/${esc(note.path)}${note.truncated ? ' · truncated' : ''}</div>${md(note.text)}</article></div>`);
+  renderMermaid(page());
 }
 
 // ---------- search ----------
@@ -462,7 +507,7 @@ function searchResults(q, limit) { return search(SX, q, limit).map((k) => SEARCH
 const resultRow = (it, active) => {
   if (it.kind === 'node') { const n = NODES[it.i]; return `<a href="${href(...nodeRoute(n.id))}" class="flex items-center gap-2.5 px-3 py-2 no-underline hover:no-underline text-fg hover:bg-hover ${active ? 'bg-hover' : ''}" data-hit>${layerDot(n.type)}<span class="truncate flex-1">${esc(shortName(n))}<span class="text-faint text-2xs ml-2">${esc(loc(n) || n.id)}</span></span><span class="badge">${esc(n.type)}</span></a>`; }
   if (it.kind === 'file') return `<a href="${href('explorer', '', { p: it.p })}" class="flex items-center gap-2.5 px-3 py-2 no-underline hover:no-underline text-fg hover:bg-hover ${active ? 'bg-hover' : ''}" data-hit>${icon('file', 'icon text-faint')}<span class="truncate flex-1">${esc(it.p)}</span><span class="badge">file</span></a>`;
-  return `<a href="../${esc(it.d.path)}" class="flex items-center gap-2.5 px-3 py-2 no-underline hover:no-underline text-fg hover:bg-hover ${active ? 'bg-hover' : ''}" data-hit>${icon('doc', 'icon text-l-project')}<span class="truncate flex-1">${esc(it.d.id)} · ${esc(it.d.title)}</span><span class="badge">${esc(it.d.status)}</span></a>`;
+  return `<a href="${href('documents', '', { d: it.d.id })}" class="flex items-center gap-2.5 px-3 py-2 no-underline hover:no-underline text-fg hover:bg-hover ${active ? 'bg-hover' : ''}" data-hit>${icon('doc', 'icon text-l-project')}<span class="truncate flex-1">${esc(it.d.id)} · ${esc(it.d.title)}</span><span class="badge">${esc(it.d.status)}</span></a>`;
 };
 function nodeRoute(id) {
   const n = NODES[IDX.get(id)];
@@ -1057,7 +1102,7 @@ function render() {
 $('#pname').textContent = D.manifest.project.name;
 $('#pmeta').textContent = `${fmt(NODES.length)} nodes · ${fmt(EDGES.length)} relationships`;
 { const t = store.get('theme', 'system'); if (t !== 'system') document.documentElement.dataset.theme = t; }
-$('#theme').onclick = () => { const dark = document.documentElement.dataset.theme ? document.documentElement.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches; setTheme(dark ? 'light' : 'dark'); if (parseRoute().page === 'project') drawProject(); };
+$('#theme').onclick = () => { const dark = document.documentElement.dataset.theme ? document.documentElement.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches; setTheme(dark ? 'light' : 'dark'); if (['project', 'documents', 'notes'].includes(parseRoute().page)) render(); };
 $('#menu').onclick = () => navOpen(true);
 $('#scrim').onclick = () => navOpen(false);
 $('#navclose').onclick = () => navOpen(false);
