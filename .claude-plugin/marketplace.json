@@ -1,0 +1,13 @@
+{
+  "name": "rm-context-marketplace",
+  "owner": { "name": "RM Template" },
+  "metadata": { "description": "RM Context — project intelligence and engineering team plugin for Claude Code" },
+  "plugins": [
+    {
+      "name": "rm-context",
+      "source": "./",
+      "description": "Your Project Intelligence, Connected. BA, SA, PM, Senior Engineer and DevOps agents on an evidence-backed project knowledge graph.",
+      "version": "0.3.0"
+    }
+  ]
+}

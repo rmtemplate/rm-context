@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" width="96" height="96" role="img" aria-labelledby="t">
+  <title id="t">RM Context</title>
+  <rect width="96" height="96" rx="22" fill="#16161D"/>
+  <g stroke="#FFFFFF"><g fill="none" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"><path d="M30 20V76"/><path d="M30 20H48A15 15 0 0 1 48 50H30"/><path d="M46 50L68 76"/></g></g>
+  <g fill="#FFFFFF"><circle cx="30" cy="20" r="7"/><circle cx="30" cy="76" r="7"/><circle cx="68" cy="76" r="7"/></g>
+  <circle cx="46" cy="50" r="9" fill="#7C6FF7" stroke="#16161D" stroke-width="3"/>
+</svg>

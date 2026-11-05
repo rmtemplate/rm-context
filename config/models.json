@@ -1,0 +1,14 @@
+{
+  "agents": {
+    "business-analyst": { "model": "opus", "reason": "Complex requirement analysis and ambiguity detection" },
+    "system-analyst": { "model": "opus", "reason": "System reasoning, data modelling and architecture" },
+    "project-manager": { "model": "sonnet", "reason": "Planning, scheduling and coordination" },
+    "senior-engineer": { "model": "opus", "reason": "Complex engineering decisions and implementation" },
+    "devops-engineer": { "model": "opus", "reason": "Infrastructure, reliability and security analysis" },
+    "architecture": { "model": "opus", "reason": "Initial repository analysis and deep investigations" },
+    "qa": { "model": "sonnet", "reason": "Testing and independent verification" },
+    "documentation": { "model": "sonnet", "reason": "Structured documentation upkeep" },
+    "quick-qa": { "model": "haiku", "reason": "Lightweight retrieval and lookups" }
+  },
+  "fallback": ["configured model", "main session model (the orchestrator passes its own model alias)"]
+}

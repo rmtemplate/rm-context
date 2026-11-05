@@ -1,0 +1,16 @@
+{
+  "description": "Expose the RM Context CLI path to Bash commands run by the session and its subagents.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if [ -n \"$CLAUDE_ENV_FILE\" ]; then printf 'export RMC_CLI=\"%s/scripts/rmc.mjs\"\\n' \"${CLAUDE_PLUGIN_ROOT}\" >> \"$CLAUDE_ENV_FILE\"; fi; exit 0",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,336 @@
+{
+  "schemaVersion": 2,
+  "statuses": ["Draft", "Under Review", "Approved", "Superseded", "Archived"],
+  "rules": {
+    "basis": "Every requirement/rule table has a Basis column whose values are Confirmed, Assumption, Open Question or Recommendation.",
+    "evidence": "Cites at least one source location (path/file.ext:line) or has registry sources.",
+    "mermaid": "Contains at least one ```mermaid diagram (a specific diagram kind when given, e.g. mermaid:erDiagram).",
+    "plan": "project-management/plan.json exists and validates.",
+    "adr-status": "The Status section states Proposed, Accepted, Deprecated or Superseded.",
+    "no-secrets": "Applies to every document: no credentials, keys, tokens or connection strings with passwords."
+  },
+  "types": {
+    "brd": { "title": "Business Requirement Document", "layer": "business", "owner": "business-analyst", "prefix": "BRD", "rules": ["basis"], "sections": [
+      { "h": "Executive Summary", "g": "The business problem and the outcome sought, in 3–5 sentences." },
+      { "h": "Business Objectives", "g": "Measurable objectives (metric, baseline, target, date). Mark objectives without a stated target as Open Question." },
+      { "h": "Stakeholders", "g": "Who is affected or decides. Link to the stakeholder analysis if one exists." },
+      { "h": "Scope", "g": "In scope / out of scope lists. Anything not explicitly agreed belongs under Open Questions." },
+      { "h": "Business Requirements", "g": "Table: | ID | Requirement | Priority (MoSCoW) | Basis | Source |. IDs BR-001… match graph node ids." },
+      { "h": "Business Rules", "g": "Rules the business enforces (BR-RULE-xxx). Cite code evidence when the rule is already implemented." },
+      { "h": "Constraints", "g": "Budget, regulatory, time, technology or organisational constraints." },
+      { "h": "Assumptions", "g": "Statements treated as true without confirmation. Write 'None recorded' if there are none." },
+      { "h": "Risks", "g": "Business risks with likelihood/impact. Feed into the RAID log." },
+      { "h": "Open Questions", "g": "Numbered questions, each with the person who can answer it." },
+      { "h": "Success Criteria", "g": "How the business will judge the project a success." }
+    ] },
+    "fsd": { "title": "Functional Specification Document", "layer": "business", "owner": "business-analyst", "prefix": "FSD", "rules": ["basis"], "sections": [
+      { "h": "Purpose & Scope", "g": "What this specification covers and which BRD requirements it refines." },
+      { "h": "Actors & Roles", "g": "Users and systems that interact with the functionality, with permissions." },
+      { "h": "Functional Requirements", "g": "Table: | ID | Requirement | Traces to (BR-xxx) | Priority | Basis |. One behaviour per row." },
+      { "h": "Process Flows", "g": "Step-by-step flows; a mermaid flowchart is encouraged for non-trivial flows." },
+      { "h": "Business Rules & Validations", "g": "Field and process validation rules with error behaviour." },
+      { "h": "Non-Functional Requirements", "g": "Performance, security, availability, accessibility, auditability — measurable where possible." },
+      { "h": "Acceptance Criteria", "g": "Given/When/Then per functional requirement, or a link to the acceptance-criteria document." },
+      { "h": "Assumptions", "g": "Write 'None recorded' if there are none." },
+      { "h": "Open Questions", "g": "Unresolved points blocking a complete specification." }
+    ] },
+    "sipoc": { "title": "SIPOC", "layer": "business", "owner": "business-analyst", "prefix": "SIPOC", "rules": ["basis"], "sections": [
+      { "h": "Process", "g": "Name, start trigger and end condition of the process being described." },
+      { "h": "SIPOC Table", "g": "Table: | Suppliers | Inputs | Process Steps | Outputs | Customers | Basis |. Keep process steps at 4–7 high-level steps." },
+      { "h": "Process Metrics", "g": "Cycle time, volume, error rate — mark unknown values as Open Question." },
+      { "h": "Assumptions", "g": "Write 'None recorded' if there are none." },
+      { "h": "Open Questions", "g": "Unconfirmed suppliers, inputs or customers." }
+    ] },
+    "process-flow": { "title": "Business Process Flow", "layer": "business", "owner": "business-analyst", "prefix": "BPF", "rules": ["mermaid", "basis"], "sections": [
+      { "h": "Process Overview", "g": "Purpose, owner, trigger, frequency." },
+      { "h": "Current State (As-Is)", "g": "Mermaid flowchart of how it works today, with evidence for system steps.", "opt": true },
+      { "h": "Target State (To-Be)", "g": "Mermaid flowchart of the intended process." },
+      { "h": "Steps", "g": "Table: | # | Step | Actor | System | Rule/Decision | Basis |." },
+      { "h": "Exceptions", "g": "What happens when a step fails or a decision is negative." },
+      { "h": "Open Questions", "g": "Write 'None' if the process is fully confirmed." }
+    ] },
+    "stakeholder-analysis": { "title": "Stakeholder Analysis", "layer": "business", "owner": "business-analyst", "prefix": "STK", "rules": ["basis"], "sections": [
+      { "h": "Stakeholder Register", "g": "Table: | ID | Stakeholder / Role | Interest | Influence (H/M/L) | Impact (H/M/L) | Basis |. Use roles, not personal data, unless the user supplied names." },
+      { "h": "Power / Interest Grid", "g": "Manage closely / keep satisfied / keep informed / monitor groupings." },
+      { "h": "Engagement Plan", "g": "Per group: channel, frequency, owner." },
+      { "h": "Open Questions", "g": "Missing decision-makers or unclear ownership." }
+    ] },
+    "use-case": { "title": "Use Case Specification", "layer": "business", "owner": "business-analyst", "prefix": "UC", "rules": [], "sections": [
+      { "h": "Use Case Summary", "g": "ID, name, goal, primary actor, related requirements (BR/FR ids)." },
+      { "h": "Preconditions", "g": "State that must hold before the use case starts." },
+      { "h": "Main Success Scenario", "g": "Numbered steps actor ↔ system." },
+      { "h": "Alternative & Exception Flows", "g": "Numbered by the step they branch from (e.g. 3a)." },
+      { "h": "Postconditions", "g": "Guaranteed state on success and on failure." },
+      { "h": "Business Rules", "g": "Rules applied, by id." },
+      { "h": "Open Questions", "g": "Write 'None' if fully confirmed." }
+    ] },
+    "user-story": { "title": "User Stories", "layer": "business", "owner": "business-analyst", "prefix": "US", "rules": ["basis"], "sections": [
+      { "h": "Stories", "g": "Table: | ID | As a … I want … so that … | Traces to | Priority | Estimate | Basis |." },
+      { "h": "Acceptance Criteria", "g": "Per story id: Given / When / Then bullets." },
+      { "h": "Definition of Ready", "g": "Checklist a story must pass before entering a sprint." },
+      { "h": "Open Questions", "g": "Per story id." }
+    ] },
+    "acceptance-criteria": { "title": "Acceptance Criteria", "layer": "business", "owner": "business-analyst", "prefix": "AC", "rules": [], "sections": [
+      { "h": "Scope", "g": "Requirements or stories these criteria cover." },
+      { "h": "Criteria", "g": "Per requirement id: Given / When / Then scenarios, including negative paths." },
+      { "h": "Verification Method", "g": "How each criterion is verified (automated test, manual, demo) and by whom." }
+    ] },
+    "rtm": { "title": "Requirement Traceability Matrix", "layer": "business", "owner": "business-analyst", "prefix": "RTM", "generated": "rtm", "rules": [], "sections": [
+      { "h": "Matrix", "g": "Generated from the graph by `rmc rtm`. Regenerate rather than hand-editing." },
+      { "h": "Gaps", "g": "Requirements with Partial or Not traced coverage and the action to close each." }
+    ] },
+    "business-rules": { "title": "Business Rules Catalog", "layer": "business", "owner": "business-analyst", "prefix": "BRC", "rules": ["basis"], "sections": [
+      { "h": "Rules", "g": "Table: | ID | Rule | Applies to | Enforced in (file:line) | Basis |. Enforced-in empty means not found in code." },
+      { "h": "Conflicts & Gaps", "g": "Rules contradicted by code or not implemented." }
+    ] },
+    "gap-analysis": { "title": "Gap Analysis", "layer": "business", "owner": "business-analyst", "prefix": "GAP", "rules": ["basis"], "sections": [
+      { "h": "Current State", "g": "What exists today, with evidence." },
+      { "h": "Target State", "g": "What is required, by requirement id." },
+      { "h": "Gaps", "g": "Table: | ID | Gap | Impact | Recommendation | Basis |." },
+      { "h": "Open Questions", "g": "Write 'None' if fully confirmed." }
+    ] },
+    "scope": { "title": "Scope Definition", "layer": "business", "owner": "business-analyst", "prefix": "SCOPE", "rules": ["basis"], "sections": [
+      { "h": "In Scope", "g": "Table: | ID | Item | Basis |." },
+      { "h": "Out of Scope", "g": "Explicit exclusions." },
+      { "h": "Deliverables", "g": "What will be handed over." },
+      { "h": "Open Questions", "g": "Items whose scope status is undecided." }
+    ] },
+
+    "srs": { "title": "System Requirement Specification", "layer": "system", "owner": "system-analyst", "prefix": "SRS", "rules": ["basis"], "sections": [
+      { "h": "Introduction", "g": "Purpose, scope, definitions, references to BRD/FSD ids." },
+      { "h": "System Overview", "g": "Context: users, external systems, main components (link the system-context diagram)." },
+      { "h": "Functional Requirements", "g": "Table: | ID (SR-xxx) | Requirement | Traces to (BR/FR) | Verification | Basis |." },
+      { "h": "Non-Functional Requirements", "g": "Measurable quality attributes: performance, availability, security, scalability, maintainability." },
+      { "h": "External Interfaces", "g": "User, API, hardware and third-party interfaces." },
+      { "h": "Data Requirements", "g": "Entities, retention, privacy classification. Link the ERD / data dictionary." },
+      { "h": "Constraints & Assumptions", "g": "Technical constraints and assumptions." },
+      { "h": "Open Questions", "g": "Write 'None' if fully confirmed." }
+    ] },
+    "sdd": { "title": "System Design Specification", "layer": "system", "owner": "system-analyst", "prefix": "SDS", "rules": ["evidence", "mermaid"], "sections": [
+      { "h": "Design Goals", "g": "Which SRS requirements and quality attributes drive the design." },
+      { "h": "Architecture Overview", "g": "Mermaid component/context diagram. Existing components must cite code evidence." },
+      { "h": "Components", "g": "Per component: responsibility, interfaces, data owned, evidence (file:line) or 'new'." },
+      { "h": "Data Design", "g": "Entities and relationships; link the ERD." },
+      { "h": "Interfaces & Integrations", "g": "APIs and external systems; link the API spec." },
+      { "h": "Error Handling & Edge Cases", "g": "Failure scenarios and expected system behaviour." },
+      { "h": "Security Considerations", "g": "AuthN/AuthZ, data protection, input validation." },
+      { "h": "Open Questions", "g": "Write 'None' if fully confirmed." }
+    ] },
+    "uml": { "title": "UML Diagrams", "layer": "system", "owner": "system-analyst", "prefix": "UML", "rules": ["mermaid"], "sections": [
+      { "h": "Diagram Purpose", "g": "Kind (use case, activity, sequence, class, state transition, system context), scope and the requirement ids it illustrates." },
+      { "h": "Diagram", "g": "One or more mermaid blocks (flowchart for use case/activity/context, sequenceDiagram, classDiagram, stateDiagram-v2)." },
+      { "h": "Notes & Evidence", "g": "Explain non-obvious elements; cite code for elements that already exist." }
+    ] },
+    "erd": { "title": "Entity Relationship Diagram", "layer": "system", "owner": "system-analyst", "prefix": "ERD", "generated": "erd", "rules": ["mermaid:erDiagram", "evidence"], "sections": [
+      { "h": "Diagram", "g": "Generated from schema/migration evidence. Add planned entities in a separate block labelled 'Planned'." },
+      { "h": "Entities", "g": "Per table: purpose and source evidence." },
+      { "h": "Relationship Notes", "g": "Cardinality decisions, cascades and soft-delete behaviour; mark inferred items." }
+    ] },
+    "api-spec": { "title": "API Specification", "layer": "system", "owner": "system-analyst", "prefix": "API", "generated": "api", "rules": ["evidence"], "sections": [
+      { "h": "Overview", "g": "Base URL per environment (no secrets), versioning, conventions." },
+      { "h": "Authentication", "g": "Scheme and where it is enforced (file:line). Never include real tokens." },
+      { "h": "Endpoints", "g": "Generated endpoint index with implementation evidence. Expand each with request, response and errors." },
+      { "h": "Error Model", "g": "Error format and status codes." },
+      { "h": "Open Questions", "g": "Undocumented behaviour that needs confirmation." }
+    ] },
+    "data-dictionary": { "title": "Data Dictionary", "layer": "system", "owner": "system-analyst", "prefix": "DD", "generated": "dictionary", "rules": ["evidence"], "sections": [
+      { "h": "Tables", "g": "Generated per table: column, type, source. Add meaning, constraints and classification (PII/confidential/public)." },
+      { "h": "Enumerations & Codes", "g": "Status values and their meaning.", "opt": true }
+    ] },
+    "integration-spec": { "title": "Integration Specification", "layer": "system", "owner": "system-analyst", "prefix": "INT", "rules": ["evidence"], "sections": [
+      { "h": "Integration Overview", "g": "Systems involved, direction, purpose, owner." },
+      { "h": "Interface Contract", "g": "Protocol, endpoints, payloads, formats, versioning." },
+      { "h": "Sequence", "g": "Mermaid sequenceDiagram of the interaction." },
+      { "h": "Error Handling & Retries", "g": "Timeouts, retries, idempotency, dead-letter handling." },
+      { "h": "Security", "g": "Credentials handling (reference the secret store, never values), network restrictions." },
+      { "h": "Monitoring", "g": "How failures are detected." }
+    ] },
+
+    "project-charter": { "title": "Project Charter", "layer": "project-management", "owner": "project-manager", "prefix": "CHARTER", "rules": [], "sections": [
+      { "h": "Project Purpose", "g": "Why the project exists; link BRD objectives." },
+      { "h": "Objectives & Success Criteria", "g": "Measurable." },
+      { "h": "Scope Summary", "g": "In/out of scope; link the scope document." },
+      { "h": "Milestones", "g": "From plan.json. Unknown dates are TBD — never invented." },
+      { "h": "Stakeholders & Roles", "g": "Sponsor, owner, team; link RACI." },
+      { "h": "Budget & Resources", "g": "Only figures the user supplied; otherwise Open Question." },
+      { "h": "Risks, Assumptions & Constraints", "g": "Top items; link the RAID log." },
+      { "h": "Approval", "g": "Approvers by role. Approval is only recorded via `rmc doc status … Approved --approved-by`." }
+    ] },
+    "wbs": { "title": "Work Breakdown Structure", "layer": "project-management", "owner": "project-manager", "prefix": "WBS", "generated": "wbs", "rules": ["plan"], "sections": [
+      { "h": "Structure", "g": "Generated from plan.json task hierarchy." },
+      { "h": "Work Package Notes", "g": "Deliverable and acceptance per top-level package." }
+    ] },
+    "gantt": { "title": "Gantt Chart", "layer": "project-management", "owner": "project-manager", "prefix": "GANTT", "generated": "gantt", "rules": ["plan", "mermaid"], "sections": [
+      { "h": "Schedule", "g": "Generated mermaid gantt. Full interactive chart: `rmc pm gantt`." },
+      { "h": "Critical Path", "g": "Generated when all tasks on the path have dates and dependencies." },
+      { "h": "Schedule Notes", "g": "Assumptions behind dates; tasks with TBD dates." }
+    ] },
+    "roadmap": { "title": "Project Roadmap", "layer": "project-management", "owner": "project-manager", "prefix": "ROAD", "generated": "roadmap", "rules": ["plan"], "sections": [
+      { "h": "Milestones", "g": "Generated from plan.json milestones." },
+      { "h": "Phases & Themes", "g": "What each phase delivers and why it is ordered this way." },
+      { "h": "Dependencies & Risks", "g": "Cross-phase dependencies and schedule risks." }
+    ] },
+    "sprint-plan": { "title": "Sprint Plan", "layer": "project-management", "owner": "project-manager", "prefix": "SPRINT", "rules": [], "sections": [
+      { "h": "Sprint Goal", "g": "One sentence." },
+      { "h": "Dates & Capacity", "g": "Start/end (from plan.json sprint) and capacity as stated by the team; TBD if unknown." },
+      { "h": "Sprint Backlog", "g": "Table: | Task ID | Task | Owner | Estimate | Depends on | Status |. Task ids exist in plan.json." },
+      { "h": "Risks & Dependencies", "g": "Blocking items." },
+      { "h": "Definition of Done", "g": "Checklist." }
+    ] },
+    "raid-log": { "title": "RAID Log", "layer": "project-management", "owner": "project-manager", "prefix": "RAID", "generated": "raid", "rules": [], "sections": [
+      { "h": "Risks", "g": "| ID | Risk | Likelihood | Impact | Owner | Mitigation | Status |" },
+      { "h": "Assumptions", "g": "| ID | Assumption | Raised by | Validation action | Status |" },
+      { "h": "Issues", "g": "| ID | Issue | Severity | Owner | Resolution | Status |" },
+      { "h": "Dependencies", "g": "| ID | Dependency | Type (internal/external) | Needed by | Status |" }
+    ] },
+    "raci": { "title": "RACI Matrix", "layer": "project-management", "owner": "project-manager", "prefix": "RACI", "rules": [], "sections": [
+      { "h": "Matrix", "g": "Table: | Activity / Deliverable | Role A | Role B | … |, cells R, A, C or I. Exactly one A per row." },
+      { "h": "Role Definitions", "g": "What each role is responsible for." }
+    ] },
+    "status-report": { "title": "Project Status Report", "layer": "project-management", "owner": "project-manager", "prefix": "STATUS", "rules": ["plan"], "sections": [
+      { "h": "Summary", "g": "Overall RAG status with a one-paragraph justification grounded in evidence." },
+      { "h": "Progress", "g": "Paste `rmc pm progress` output: planned vs verified progress. Never estimate from elapsed time." },
+      { "h": "Completed (verified)", "g": "Tasks with evidence (commit, file, test)." },
+      { "h": "In Progress & Blocked", "g": "With blockers and owners." },
+      { "h": "Upcoming Milestones", "g": "From plan.json." },
+      { "h": "Risks & Issues", "g": "Top items from RAID." },
+      { "h": "Decisions Needed", "g": "From the user/stakeholders." }
+    ] },
+    "release-plan": { "title": "Release Plan", "layer": "project-management", "owner": "project-manager", "prefix": "REL", "rules": [], "sections": [
+      { "h": "Release Scope", "g": "Features/requirements included, by id." },
+      { "h": "Schedule", "g": "Code freeze, test, release dates (TBD if unknown)." },
+      { "h": "Readiness Criteria", "g": "Tests, approvals, docs, runbooks required." },
+      { "h": "Communication", "g": "Who is informed, when." }
+    ] },
+    "change-log": { "title": "Change Request Log", "layer": "project-management", "owner": "project-manager", "prefix": "CRL", "rules": [], "sections": [
+      { "h": "Change Requests", "g": "Table: | CR ID | Date | Requested by | Change | Impact report | Decision | Status |. Link `rmc impact` output." }
+    ] },
+
+    "technical-design": { "title": "Technical Design", "layer": "engineering", "owner": "senior-engineer", "prefix": "TD", "rules": ["evidence"], "sections": [
+      { "h": "Context", "g": "Problem and the requirement ids addressed." },
+      { "h": "Existing Implementation", "g": "What already exists, with file:line evidence. Required before proposing changes." },
+      { "h": "Proposed Design", "g": "Components, data flow, interfaces. Reuse existing conventions; justify any new dependency." },
+      { "h": "Alternatives Considered", "g": "At least one, with why it was rejected." },
+      { "h": "Backward Compatibility & Migration", "g": "API/data compatibility and migration steps." },
+      { "h": "Security & Performance", "g": "Threats, limits, expected load." },
+      { "h": "Test Approach", "g": "What is tested and how." },
+      { "h": "Open Questions", "g": "Write 'None' if fully resolved." }
+    ] },
+    "adr": { "title": "Architecture Decision Record", "layer": "engineering", "owner": "senior-engineer", "prefix": "ADR", "rules": ["adr-status"], "sections": [
+      { "h": "Status", "g": "Proposed | Accepted | Deprecated | Superseded (by ADR-xxx)." },
+      { "h": "Context", "g": "Forces at play, with evidence for current-state claims." },
+      { "h": "Decision", "g": "The decision, stated actively ('We will …')." },
+      { "h": "Alternatives", "g": "Options considered with trade-offs." },
+      { "h": "Consequences", "g": "Positive, negative and follow-up work." }
+    ] },
+    "code-review": { "title": "Code Review Report", "layer": "engineering", "owner": "senior-engineer", "prefix": "CR", "rules": ["evidence"], "sections": [
+      { "h": "Scope", "g": "Files/commits/PR reviewed and the requirement ids they implement." },
+      { "h": "Findings", "g": "Table: | # | Severity (Critical/High/Medium/Low) | Location (file:line) | Finding | Recommendation |." },
+      { "h": "Security", "g": "Security-relevant findings or 'No issues found in reviewed scope'." },
+      { "h": "Checks Run", "g": "Tests/lint/build commands executed and their results. State checks not run." },
+      { "h": "Verdict", "g": "Approve / Request changes, with conditions." }
+    ] },
+    "tech-debt": { "title": "Technical Debt Register", "layer": "engineering", "owner": "senior-engineer", "prefix": "TDR", "rules": ["evidence"], "sections": [
+      { "h": "Register", "g": "Table: | ID | Debt | Location (file:line) | Impact | Effort | Proposed fix | Status |." },
+      { "h": "Prioritisation", "g": "Why the top items come first." }
+    ] },
+    "test-strategy": { "title": "Test Strategy", "layer": "engineering", "owner": "senior-engineer", "prefix": "TST", "rules": [], "sections": [
+      { "h": "Scope & Objectives", "g": "What quality risks testing addresses." },
+      { "h": "Test Levels", "g": "Unit, integration, end-to-end, non-functional — tools already used in the repo first." },
+      { "h": "Current Coverage", "g": "Existing test suites with evidence (test file paths, CI jobs)." },
+      { "h": "Environments & Data", "g": "Where tests run and how test data is managed (no production data)." },
+      { "h": "Entry & Exit Criteria", "g": "When testing starts and when it is done." },
+      { "h": "Traceability", "g": "How tests map to requirements (tested_by edges / RTM)." }
+    ] },
+    "test-cases": { "title": "Test Cases", "layer": "engineering", "owner": "qa", "prefix": "TC", "rules": [], "sections": [
+      { "h": "Test Cases", "g": "Table: | ID | Requirement | Preconditions | Steps | Expected result | Type | Automated in |." }
+    ] },
+    "implementation-plan": { "title": "Implementation Plan", "layer": "engineering", "owner": "senior-engineer", "prefix": "IMPL", "rules": ["evidence"], "sections": [
+      { "h": "Goal", "g": "Requirement ids and the definition of done." },
+      { "h": "Affected Areas", "g": "Files/modules with evidence; paste relevant `rmc impact` findings." },
+      { "h": "Steps", "g": "Ordered, each small and verifiable; map to plan.json task ids." },
+      { "h": "Testing", "g": "Tests added/updated per step." },
+      { "h": "Rollout & Rollback", "g": "Feature flags, migrations, how to undo." },
+      { "h": "Risks", "g": "Technical risks and mitigations." }
+    ] },
+    "refactoring-plan": { "title": "Refactoring Plan", "layer": "engineering", "owner": "senior-engineer", "prefix": "REF", "rules": ["evidence"], "sections": [
+      { "h": "Motivation", "g": "Concrete problems with file:line evidence." },
+      { "h": "Target Structure", "g": "What the code should look like afterwards." },
+      { "h": "Steps", "g": "Behaviour-preserving steps, each independently testable." },
+      { "h": "Safety Net", "g": "Tests that must pass before and after." }
+    ] },
+    "engineering-standards": { "title": "Engineering Standards", "layer": "engineering", "owner": "senior-engineer", "prefix": "STD", "rules": ["evidence"], "sections": [
+      { "h": "Observed Conventions", "g": "Conventions already used in the codebase, each with an example location." },
+      { "h": "Standards", "g": "Naming, structure, error handling, logging, testing, reviews." },
+      { "h": "Tooling", "g": "Linters/formatters/CI checks already configured." }
+    ] },
+
+    "infrastructure-design": { "title": "Infrastructure Architecture Document", "layer": "infrastructure", "owner": "devops-engineer", "prefix": "INFRA", "generated": "infra", "rules": ["evidence"], "sections": [
+      { "h": "Current Infrastructure", "g": "Generated inventory of services, containers, networks and pipelines with evidence." },
+      { "h": "Target Architecture", "g": "Mermaid diagram plus explanation; separate existing (evidence) from proposed." },
+      { "h": "Environments", "g": "Environment list and differences; link env matrix." },
+      { "h": "Reliability & Scalability", "g": "Single points of failure, scaling approach, SLOs (if stated)." },
+      { "h": "Security", "g": "Network boundaries, secret management (location only), hardening; link checklist." },
+      { "h": "Cost Considerations", "g": "Cost drivers; figures only if supplied." },
+      { "h": "Open Questions", "g": "Write 'None' if fully confirmed." }
+    ] },
+    "deployment-architecture": { "title": "Deployment Architecture", "layer": "infrastructure", "owner": "devops-engineer", "prefix": "DEP", "rules": ["mermaid", "evidence"], "sections": [
+      { "h": "Deployment Diagram", "g": "Mermaid flowchart of nodes, containers and network paths." },
+      { "h": "Components", "g": "Per deployable: image/build, ports, dependencies, evidence." },
+      { "h": "Network Topology", "g": "Networks, ingress, reverse proxy, TLS termination." },
+      { "h": "Configuration", "g": "Configuration sources and variable names (never values)." }
+    ] },
+    "cicd-spec": { "title": "CI/CD Pipeline Specification", "layer": "infrastructure", "owner": "devops-engineer", "prefix": "CICD", "generated": "cicd", "rules": ["evidence"], "sections": [
+      { "h": "Existing Pipelines", "g": "Generated from CI files with evidence." },
+      { "h": "Stages", "g": "Build, test, scan, package, deploy — per stage: trigger, commands, artefacts, gates." },
+      { "h": "Environments & Promotion", "g": "How a change moves between environments; approvals." },
+      { "h": "Secrets Handling", "g": "Where CI secrets are stored (by name only)." },
+      { "h": "Gaps & Recommendations", "g": "Missing checks, slow steps, flaky jobs." }
+    ] },
+    "env-matrix": { "title": "Environment Configuration Matrix", "layer": "infrastructure", "owner": "devops-engineer", "prefix": "ENV", "generated": "env", "rules": [], "sections": [
+      { "h": "Variables", "g": "Generated variable names from env templates. Add per-environment presence/source — never values." },
+      { "h": "Environments", "g": "| Environment | Purpose | URL (non-secret) | Deployed from | Owner |" }
+    ] },
+    "runbook": { "title": "Infrastructure Runbook", "layer": "infrastructure", "owner": "devops-engineer", "prefix": "RUN", "rules": [], "sections": [
+      { "h": "Service Overview", "g": "What it is, owners, dependencies." },
+      { "h": "Routine Operations", "g": "Start/stop/deploy/scale commands, exactly as run." },
+      { "h": "Health Checks", "g": "How to know it is healthy." },
+      { "h": "Troubleshooting", "g": "Symptom → diagnosis → fix." },
+      { "h": "Escalation", "g": "Roles to contact." }
+    ] },
+    "backup-recovery": { "title": "Backup and Disaster Recovery Plan", "layer": "infrastructure", "owner": "devops-engineer", "prefix": "BDR", "rules": [], "sections": [
+      { "h": "Scope & Objectives", "g": "Data/systems covered, RPO and RTO (as stated; otherwise Open Question)." },
+      { "h": "Backup Procedures", "g": "What, how, frequency, retention, storage location (no credentials)." },
+      { "h": "Restore Procedures", "g": "Step-by-step restore, including verification." },
+      { "h": "Testing Schedule", "g": "How and when restores are tested." },
+      { "h": "Open Questions", "g": "Write 'None' if fully confirmed." }
+    ] },
+    "security-checklist": { "title": "Security Hardening Checklist", "layer": "infrastructure", "owner": "devops-engineer", "prefix": "SEC", "rules": [], "sections": [
+      { "h": "Checklist", "g": "Table: | Control | Status (Pass/Fail/Unknown/N/A) | Evidence | Action |. Unknown is valid; never guess Pass." },
+      { "h": "Findings", "g": "Failed controls ranked by risk." }
+    ] },
+    "deployment-checklist": { "title": "Deployment Checklist", "layer": "infrastructure", "owner": "devops-engineer", "prefix": "DCL", "rules": [], "sections": [
+      { "h": "Pre-Deployment", "g": "Checks before deploying (tests green, migrations reviewed, backups taken)." },
+      { "h": "Deployment Steps", "g": "Exact steps." },
+      { "h": "Post-Deployment Verification", "g": "Smoke tests and metrics to watch." }
+    ] },
+    "rollback-plan": { "title": "Rollback Plan", "layer": "infrastructure", "owner": "devops-engineer", "prefix": "RBK", "rules": [], "sections": [
+      { "h": "Rollback Triggers", "g": "Conditions that trigger rollback." },
+      { "h": "Rollback Procedure", "g": "Steps for application, database and configuration." },
+      { "h": "Data Considerations", "g": "Irreversible migrations and how they are handled." },
+      { "h": "Verification", "g": "How to confirm rollback succeeded." }
+    ] },
+    "monitoring": { "title": "Monitoring and Alerting Strategy", "layer": "infrastructure", "owner": "devops-engineer", "prefix": "MON", "rules": [], "sections": [
+      { "h": "Signals", "g": "Metrics, logs, traces per service; what exists today (evidence) vs proposed." },
+      { "h": "Alerts", "g": "| Alert | Condition | Severity | Route | Runbook |" },
+      { "h": "Dashboards", "g": "What each dashboard answers." }
+    ] },
+    "incident-report": { "title": "Incident Report", "layer": "infrastructure", "owner": "devops-engineer", "prefix": "INC", "rules": [], "sections": [
+      { "h": "Summary", "g": "What happened, impact, duration." },
+      { "h": "Timeline", "g": "Timestamped events (UTC)." },
+      { "h": "Root Cause", "g": "Evidence-based; mark hypotheses as such." },
+      { "h": "Resolution", "g": "What fixed it." },
+      { "h": "Action Items", "g": "| Action | Owner | Due | Status |" }
+    ] }
+  }
+}

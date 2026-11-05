@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 96" width="360" height="96" role="img" aria-labelledby="t"><title id="t">RM Context</title>
+  <g stroke="#F4F4F7"><g fill="none" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"><path d="M30 20V76"/><path d="M30 20H48A15 15 0 0 1 48 50H30"/><path d="M46 50L68 76"/></g></g>
+  <g fill="#F4F4F7"><circle cx="30" cy="20" r="7"/><circle cx="30" cy="76" r="7"/><circle cx="68" cy="76" r="7"/></g>
+  <circle cx="46" cy="50" r="9" fill="#8F84FF" stroke="#16161D" stroke-width="3"/>
+  <text x="112" y="62" font-family="Inter, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="40" font-weight="700" letter-spacing="-0.6" fill="#F4F4F7">RM<tspan font-weight="500" dx="10">Context</tspan></text>
+</svg>
