@@ -1,12 +1,15 @@
-// Per-file fact extraction. Regex-based, zero dependencies.
-// ponytail: regex, not AST — literal declarations/imports/routes are reliable; dynamic registration, macros,
-// route prefixes/groups and computed names are missed. Swap a language for a real parser if precision matters.
+// Per-file fact extraction, zero dependencies. Imports, tables, infrastructure and most declarations are regex-based;
+// routes (and C#/Java/Kotlin declarations) come from the route intelligence engine (scripts/lib/routes/), which
+// tokenizes and structurally parses the file. The regex route patterns below remain only as a fallback for files
+// where no framework is detected.
 import path from 'node:path';
+import { analyze, routeConfig } from './routes/engine.mjs';
 
 const LANG = {
   js: ['js', 'mjs', 'cjs', 'jsx', 'ts', 'tsx', 'mts', 'cts', 'vue', 'svelte'], php: ['php'], py: ['py'], go: ['go'],
-  java: ['java', 'kt', 'kts'], rb: ['rb'], cs: ['cs'], sql: ['sql'], prisma: ['prisma'],
+  java: ['java', 'kt', 'kts'], rb: ['rb'], cs: ['cs'], rs: ['rs'], sql: ['sql'], prisma: ['prisma'],
 };
+const ROUTE_LANGS = new Set(['js', 'php', 'py', 'go', 'java', 'rb', 'cs', 'rs']);
 const EXT_LANG = Object.fromEntries(Object.entries(LANG).flatMap(([l, xs]) => xs.map((x) => [x, l])));
 
 export const TEST_RE = /(^|\/)(tests?|__tests__|spec|specs)\/|\.(test|spec)\.[a-z]+$|_test\.(go|py)$|(^|\/)test_[^/]+\.py$|Tests?\.(php|java|kt|cs)$/;
@@ -18,6 +21,8 @@ export function langOf(rel) {
   if (/^\.github\/workflows\/.+\.ya?ml$/.test(rel) || /^(\.gitlab-ci\.yml|bitbucket-pipelines\.yml|azure-pipelines\.yml|Jenkinsfile|\.drone\.yml|\.circleci\/config\.yml)$/.test(rel)) return 'ci';
   if (/^\.env\.(example|sample|template|dist|defaults)$/.test(base)) return 'envexample';
   if (base === 'package.json' || base === 'composer.json' || base === 'go.mod' || base === 'Gemfile' || base === 'Cargo.toml' || base === 'pyproject.toml' || /^requirements.*\.txt$/.test(base)) return 'manifest';
+  if (base === 'pom.xml' || /^build\.gradle(\.kts)?$/.test(base) || /\.csproj$/.test(base)) return 'manifest';
+  if (/^(application|bootstrap)(-[\w-]+)?\.(properties|ya?ml)$/.test(base)) return 'appconfig';
   if (base === 'Procfile') return 'procfile';
   const ext = base.includes('.') ? base.split('.').pop().toLowerCase() : '';
   if (ext === 'tf') return 'terraform';
@@ -183,9 +188,6 @@ const EXTRACTORS = {
     if (/@Entity\b/.test(text)) { const c = x.decls.find((d) => d.type === 'class'); if (c) x.decls.push({ type: 'entity', name: c.name, line: c.line }); }
     const t = text.match(/@Table\(\s*name\s*=\s*"(\w+)"/);
     if (t) x.meta.modelTable = t[1];
-    const base = (text.match(/@RequestMapping\(\s*(?:value\s*=\s*|path\s*=\s*)?"([^"]*)"/) || [])[1] || '';
-    all(/@(Get|Post|Put|Patch|Delete)Mapping\(\s*(?:value\s*=\s*|path\s*=\s*)?"([^"]*)"/g, text, (m) =>
-      x.routes.push({ method: m[1].toUpperCase(), path: (base + '/' + m[2]).replace(/\/+/g, '/'), line: lineAt(m.index) }));
     sqlUses(text, lineAt, x.dbUses);
     return x;
   },
@@ -210,7 +212,23 @@ const EXTRACTORS = {
     all(/^\s*using\s+([\w.]+)\s*;/gm, text, (m) => x.imports.push({ spec: m[1], line: lineAt(m.index), names: [] }));
     all(/^\s*(?:public\s+|internal\s+|private\s+|sealed\s+|abstract\s+|static\s+|partial\s+)*(?:class|interface|record|struct)\s+(\w+)/gm, text, (m) =>
       x.decls.push({ type: 'class', name: m[1], line: lineAt(m.index), end: braceEnd(text, m.index, lineAt) }));
-    all(/\[Http(Get|Post|Put|Patch|Delete)\(\s*"([^"]*)"\s*\)\]/g, text, (m) => x.routes.push({ method: m[1].toUpperCase(), path: '/' + m[2], line: lineAt(m.index) }));
+    return x;
+  },
+
+  rs(text, rel, lineAt) {
+    const x = X();
+    all(/^\s*(?:pub(?:\([^)]*\))?\s+)?use\s+([\w:]+)/gm, text, (m) => x.imports.push({ spec: m[1], line: lineAt(m.index), names: [] }));
+    all(/^\s*(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?(?:unsafe\s+)?fn\s+(\w+)/gm, text, (m) => x.decls.push({ type: 'function', name: m[1], line: lineAt(m.index), end: braceEnd(text, m.index, lineAt) }));
+    all(/^\s*(?:pub(?:\([^)]*\))?\s+)?(?:struct|enum|trait)\s+(\w+)/gm, text, (m) => x.decls.push({ type: 'class', name: m[1], line: lineAt(m.index), end: braceEnd(text, m.index, lineAt) }));
+    sqlUses(text, lineAt, x.dbUses);
+    return x;
+  },
+
+  appconfig(text, rel) {
+    const x = X();
+    // Only path-like prefix keys are kept (server.servlet.context-path, quarkus.rest.path, …); other values are never stored.
+    const cfg = routeConfig(rel, text);
+    if (cfg) x.routeConfig = cfg;
     return x;
   },
 
@@ -270,6 +288,16 @@ const EXTRACTORS = {
     } else if (base === 'go.mod') {
       x.meta.module = (text.match(/^module\s+(\S+)/m) || [])[1];
       all(/^\s*(?:require\s+)?([\w.-]+\.[\w.-]+\/[\w./-]+)\s+(v[\w.+-]+)/gm, text, (m) => x.deps.push({ eco: 'go', name: m[1], version: m[2], dev: false, line: lineAt(m.index) }));
+    } else if (base === 'pom.xml') {
+      all(/<dependency>\s*<groupId>\s*([\w.-]+)\s*<\/groupId>\s*<artifactId>\s*([\w.-]+)\s*<\/artifactId>(?:\s*<version>\s*([^<]*)<\/version>)?/g, text, (m) =>
+        x.deps.push({ eco: 'maven', name: `${m[1]}:${m[2]}`, version: (m[3] || '').trim(), dev: false, line: lineAt(m.index) }));
+    } else if (/^build\.gradle(\.kts)?$/.test(base)) {
+      all(/^\s*(implementation|api|compileOnly|runtimeOnly|testImplementation|kapt|ksp|annotationProcessor)\s*\(?\s*['"]([\w.-]+):([\w.-]+)(?::([^'"]+))?['"]/gm, text, (m) =>
+        x.deps.push({ eco: 'maven', name: `${m[2]}:${m[3]}`, version: m[4] || '', dev: /^test/.test(m[1]), line: lineAt(m.index) }));
+    } else if (/\.csproj$/.test(base)) {
+      const sdk = text.match(/<Project\s+Sdk="([^"]+)"/);
+      if (sdk) x.meta.sdk = sdk[1];
+      all(/<PackageReference\s+Include="([^"]+)"(?:\s+Version="([^"]*)")?/g, text, (m) => x.deps.push({ eco: 'nuget', name: m[1], version: m[2] || '', dev: false, line: lineAt(m.index) }));
     } else if (base === 'Gemfile') {
       all(/^\s*gem\s+['"]([\w-]+)['"]/gm, text, (m) => x.deps.push({ eco: 'gem', name: m[1], version: '', dev: false, line: lineAt(m.index) }));
     } else if (base === 'Cargo.toml') {
@@ -389,8 +417,20 @@ export function extract(rel, text) {
   const lang = langOf(rel);
   if (!lang || !EXTRACTORS[lang]) return { lang: lang || 'other', test: TEST_RE.test(rel) };
   const x = EXTRACTORS[lang](text, rel, lines(text));
+  if (ROUTE_LANGS.has(lang)) mergeRoutes(x, analyze(rel, text, lang), rel);
   // Drop empty arrays to keep the cache small.
   for (const k of Object.keys(x)) if (Array.isArray(x[k]) && !x[k].length) delete x[k];
   if (x.meta && !Object.keys(x.meta).length) delete x.meta;
   return { lang, test: TEST_RE.test(rel), loc: text.split('\n').length, ...x };
+}
+
+// Engine output replaces the regex routes for files whose framework was detected; C#/Java/Kotlin declarations come
+// from the structural parser (classes, interfaces, methods with typed calls). Regex routes that remain are marked so
+// they are never presented as verified.
+function mergeRoutes(x, a, rel) {
+  if (a.decls) x.decls = [...a.decls, ...x.decls.filter((d) => d.type === 'entity')];
+  if (a.extraDecls) x.decls.push(...a.extraDecls.filter((d) => !x.decls.some((e) => e.name === d.name && e.line === d.line)));
+  if (a.claimed || a.routes) x.routes = a.routes || [];
+  else { const fw = a.frameworks?.[0]?.id; x.routes = x.routes.map((r) => ({ ...r, ...(fw ? { framework: fw } : {}), extraction: 'regex', status: 'partial', exact: false, note: fw ? `matched by the generic pattern extractor (${fw} recognised; prefixes and groups are not composed)` : 'matched by a generic pattern; no supported framework was detected in this file' })); }
+  for (const k of ['consts', 'frameworks', 'routeCalls', 'routeConv', 'routeApp', 'routeIssues', 'routeStats', 'routeClasses']) if (a[k]) x[k] = a[k];
 }

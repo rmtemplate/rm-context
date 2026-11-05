@@ -70,11 +70,11 @@ async function generated(c, kind) {
     case 'api': {
       const apis = of('api');
       if (!apis.length) return '_No routes detected by the scanner. Document planned endpoints below and mark them as planned._';
-      return ['| Method | Path | Implemented in | Handler | Confidence |', '|---|---|---|---|---|', ...apis.map((a) => {
+      return ['| Method | Path | Implemented in | Handler | Confidence | Framework | Status |', '|---|---|---|---|---|---|---|', ...apis.map((a) => {
         const impl = ix.inc(a.id).filter((e) => e.type === 'implements').map((e) => `\`${ix.byId.get(e.source).name}\``).join(', ') || '—';
         const handler = ix.out(a.id).filter((e) => e.type === 'calls').map((e) => `\`${e.target.split('#').pop()}\``).join(', ') || '—';
-        return `| ${a.attrs?.method || ''} | \`${a.attrs?.path || a.name}\` | ${impl} (${evRef(a)}) | ${handler} | ${a.confidence} |`;
-      }), '', '_Route prefixes from router mounting or route groups are not resolved by the scanner; confirm full paths in source._'].join('\n');
+        return `| ${a.attrs?.method || ''} | \`${a.attrs?.path || a.name}\` | ${impl} (${evRef(a)}) | ${handler} | ${a.confidence} | ${a.attrs?.framework || '—'} | ${a.attrs?.resolutionStatus || '—'} |`;
+      }), '', '_Status `partial` means part of the path could not be resolved statically; the unresolved part is shown as `{?expression}`. Run `rmc api coverage` for per-framework coverage._'].join('\n');
     }
     case 'dictionary': {
       const tables = of('table');

@@ -518,6 +518,7 @@ Run `rmc help` for the full reference. All commands run in the current directory
 | `rmc pm init \| validate \| progress \| gantt \| mermaid \| health` | Plan, Gantt and health |
 | `rmc routing` · `rmc route …` | Agent defaults; adaptive model choice, escalation, stats |
 | `rmc handoff add <file.json> \| list [--to agent]` | Structured hand-offs between roles |
+| `rmc api list [--framework f] [--status s] \| frameworks \| coverage [--json]` | Extracted routes with resolution status; framework capability matrix; per-framework coverage |
 | `rmc context "<prompt>" [--max-tokens n] [--json]` · `rmc context status` | Preview the knowledge added for a prompt; automatic-context diagnostics |
 
 ## Claude Code commands
@@ -624,9 +625,26 @@ The same file also holds:
 ¹ You run the CLI yourself in a terminal, and the platform reads the generated files. There is no adapter and it has not been tested inside the platform.
 ² Without an agent, the CLI creates templates, pre-fills sections from the graph or plan, then validates, versions and exports. You write the analysis.
 
+### Route extraction by framework
+
+Run `rmc api frameworks` for the live list with patterns and limitations. **Supported** = structural extraction covered by regression fixtures. **Partial** = the listed patterns only (C#/Java partial adapters are structural; the other languages use the older pattern extractor: literal paths, no prefix composition). **Detected** = recognised and reported, routes not extracted.
+
+| Language | Supported | Partial | Detected |
+|---|---|---|---|
+| C# | ASP.NET Core (controllers + Minimal API), ASP.NET Web API 2 | WCF WebHttp, ServiceStack | Nancy |
+| Java / Kotlin | Spring MVC/WebFlux annotations, JAX-RS (incl. Quarkus), Micronaut | Spring WebFlux functional, Vert.x Web, Servlets, Ktor | none |
+| JavaScript / TypeScript | none | Express, Koa, Hono, Next.js | NestJS, Fastify, Nuxt, AdonisJS |
+| PHP | none | Laravel | Symfony, Slim, CodeIgniter |
+| Python | none | FastAPI, Flask, Django URLconf | Django REST framework |
+| Go | none | Gin, Echo, Fiber, Chi, gorilla/mux, net/http | none |
+| Ruby | none | Rails routes | Sinatra |
+| Rust | none | none | Axum, Actix Web, Rocket |
+
+Parsing uses a built-in tokenizer and structural parser: no npm dependencies, no network, and user code is never executed. tree-sitter, Roslyn and JavaParser are not used. **Adding a framework** means adding an entry to an adapter module in `scripts/lib/routes/adapters/` that configures the `declarative` or `registration` strategy, plus a fixture under `tests/fixtures/routes/`. The graph schema does not change. Extractor tests: `node --test tests/routes.test.mjs`.
+
 ## Limitations
 
-- **Pattern-based extraction, not a full parser.** Dynamic routes, router mount prefixes (`app.use('/api', router)`), route groups and runtime registration can be missed. Heuristic links are marked `inferred`.
+- **Structural extraction, not a compiler.** C# and Java route prefixes are resolved from constants, groups, base classes, configuration and call sites when they are statically known. Anything else (a prefix computed at runtime, reflection, runtime registration) is kept as a partial route with its unresolved part, known prefix and reason, marked `inferred`. In the other languages, router mount prefixes (`app.use('/api', router)`) and route groups are not composed yet. Heuristic links are marked `inferred`.
 - **Business intent comes from agents or people.** It is never inferred automatically from code.
 - **The model is applied only where the platform supports it.** No integration changes your main session's model.
 - **External tools for some exports.** PDF needs Chrome, Chromium or Edge (or set `RMC_CHROME`). DOCX needs pandoc. Mermaid in HTML exports needs network access to render.

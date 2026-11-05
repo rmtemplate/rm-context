@@ -24,6 +24,9 @@ Core
   route --escalate <R-id> --reason "…" [--handoff H-id]   Next tier for the same agent, reusing its hand-off
   route categories | stats [--json]
   handoff add <file.json> | list [--to agent]
+  api list [--framework f] [--status complete|partial|unresolved] [--json]   Extracted HTTP routes with resolution status
+  api frameworks [--json]          Route framework capability matrix (Supported / Partial / Detected / Planned)
+  api coverage [--json]            Per-framework route coverage from the last scan
   context <prompt…> [--max-tokens N] [--json]   Relevant knowledge for a task, within a token budget
   context --session | status [--json]           Session summary · automatic-context diagnostics
 
@@ -106,6 +109,23 @@ async function main(argv) {
       const md = impactReport(c, [sub, ...rest].filter(Boolean).join(' '), { changed: !!args.changed, depth: Number(args.depth) || 4 });
       if (args.out) { writeFile(path.resolve(root, args.out), md); return out(`Wrote ${args.out}`); }
       return out(md);
+    }
+    case 'api': {
+      if (sub === 'frameworks') {
+        const { capabilityMatrix } = await import('./lib/routes/registry.mjs');
+        const m = capabilityMatrix();
+        return out(args.json ? m : m.map((x) => `${x.status.padEnd(10)} ${x.language.padEnd(11)} ${x.id.padEnd(18)} ${x.name}`).join('\n'));
+      }
+      requireInit(c);
+      if (sub === 'coverage') {
+        const r = readJson(c.scan, {}).routes || [];
+        return out(args.json ? r : r.map((x) => `${x.framework} (${x.language}, ${x.status}): ${x.routes} routes, ${x.verified} verified, ${x.inferred} inferred, ${x.unresolved} unresolved, ${x.unsupported} unsupported patterns`).join('\n') || 'No routes detected.');
+      }
+      if (sub && sub !== 'list') fail(`Unknown: rmc api ${sub}. Use: rmc api list | frameworks | coverage`);
+      const { loadGraph } = await import('./lib/graph.mjs');
+      const apis = loadGraph(c).nodes.filter((n) => n.type === 'api' && (!args.framework || n.attrs?.framework === args.framework) && (!args.status || (n.attrs?.resolutionStatus || 'complete') === args.status))
+        .sort((a, b) => a.name.localeCompare(b.name));
+      return out(args.json ? apis : apis.map((n) => `${n.name.padEnd(48)} ${(n.attrs?.framework || '-').padEnd(14)} ${(n.attrs?.resolutionStatus || '-').padEnd(10)} ${n.confidence.padEnd(8)} ${n.evidence?.[0] ? `${n.evidence[0].file}:${n.evidence[0].lines?.[0]}` : ''}`).join('\n') || 'No routes.');
     }
     case 'graph': {
       requireInit(c);

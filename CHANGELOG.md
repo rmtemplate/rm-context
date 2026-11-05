@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **Route intelligence engine** (`scripts/lib/routes/`). A dependency-free tokenizer and structural parser replace the C# and Java route regexes. Shared strategies cover declarative routing (class prefix + method annotations) and registration routing (fluent calls, groups, scopes, mounts, registration functions resolved through their call sites).
+- **C#:** ASP.NET Core controllers (`[Route]` prefixes, `[controller]`/`[action]`/`[area]` tokens, `~/` overrides, inherited base-class prefixes, route constants across files, `[AcceptVerbs]`) and Minimal API (`MapGroup` nesting, extension-method endpoint modules, `MapMethods`, fallbacks, `RequireAuthorization`). Legacy ASP.NET Web API 2 (`RoutePrefix`, verb by method name, conventional `MapHttpRoute`/`MapControllerRoute` templates). WCF and ServiceStack are partial.
+- **Java/Kotlin:** Spring MVC/WebFlux annotations (`${property}` placeholders from application.properties/yml, context-path, path and method arrays, superclass prefixes, constants; Feign and HttpExchange clients excluded), JAX-RS/Quarkus (`@ApplicationPath`), Micronaut. Spring WebFlux functional routing, Vert.x Web, servlets and Ktor are partial.
+- **Route model:** each `api` node keeps its id (`api:METHOD /path`) and gains `attrs` for framework, language, original template, controller, handler, parameters, request body, response type, consumes/produces, auth, API version, resolution status and the unresolved parts (known prefix, expression, reason). Routes are `verified` only when fully resolved from literal or constant evidence.
+- **Relationships:** route to handler (`calls`), handler to service through declared field/parameter types (interface to its single implementation), repository/DbSet to entity (`depends_on`, from explicit generic arguments), service to table/entity reads and writes. No links are made from name similarity.
+- **Coverage report:** `scan.json` now has `routes` (per framework: files, controllers, registrations, routes, verified, inferred, unresolved, unsupported patterns with reasons) and `routeIdChanges`. When a route id changes because its prefix became resolvable, agent annotations and edges follow it.
+- **`rmc api list | frameworks | coverage`:** routes with resolution status, the framework capability matrix, and the per-framework coverage from the last scan.
+- Manifests: `pom.xml`, `build.gradle(.kts)` and `.csproj` dependencies. Rust (`rs`) files are indexed. Spring/Quarkus/Micronaut application config is read for path keys only; secret-like keys are never stored.
+- Frameworks in other languages (Express, Koa, Hono, Next.js, NestJS, Fastify, Nuxt, AdonisJS, Laravel, Symfony, Slim, CodeIgniter, FastAPI, Flask, Django, DRF, Gin, Echo, Fiber, Chi, gorilla/mux, net/http, Rails, Sinatra, Axum, Actix, Rocket) are recognised and reported with an honest status. Their routes still come from the existing pattern extractor.
+
+### Changed
+- `EXTRACTOR_VERSION` 4: the next refresh re-reads every file once.
+- C# and Java methods are indexed as `function` nodes (`file#Method`, with `@line` when a name repeats in a file).
+
 ## 0.4.1 — 2026-11-06
 
 ### Added
