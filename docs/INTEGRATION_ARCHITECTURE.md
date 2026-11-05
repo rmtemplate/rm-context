@@ -28,7 +28,9 @@ RM Context has two parts:
 | Graph, evidence, impact, RTM | `graph.mjs`, `project.mjs` | — |
 | Documents, lifecycle, approval gate, export | `docs.mjs`, `templates/catalog.json` | — |
 | Plan, Gantt, critical path, health | `pm.mjs` | — |
-| Viewer | `viewer.mjs`, `viewer/template.html` | — |
+| Viewer | `viewer.mjs`, `viewer/` (template, app, graph core, compiled CSS) | — |
+| Prompt retrieval and incremental refresh logic | `context.mjs` (`retrieve`, `recordChange`, `applyPending`), `rmc context` | — |
+| Calling that logic automatically per session, prompt and turn | — | the platform's hooks (Claude Code: `scripts/hooks.mjs`, `hooks/hooks.json`) |
 | Hand-offs between roles | `rmc handoff` | — |
 | Task category → default agent and model tier | `config/models.json` `tasks`, `rmc route` | — |
 | Role definitions (BA, SA, PM, Senior Engineer, DevOps, …) | role rules in `skills/*/SKILL.md` | the platform's agent format |
@@ -61,10 +63,12 @@ Tier-to-model mapping lives in the `tiers` block of `config/models.json`, which 
 
 | Platform | Adapter | Mechanisms checked in the platform's documentation (November 2026) |
 |---|---|---|
-| Claude Code | **Supported**: `agents/`, `skills/`, `commands/`, `hooks/`, `.claude-plugin/` | Plugin marketplace; subagents take a `model` alias per delegation; `!` context injection; SessionStart hook |
+| Claude Code | **Supported**: `agents/`, `skills/`, `commands/`, `hooks/`, `.claude-plugin/` | Plugin marketplace; subagents take a `model` alias per delegation; `!` context injection; `SessionStart`, `UserPromptSubmit`, `PostToolUse` and `Stop` hooks (automatic context, verified in a headless session) |
 | OpenAI Codex | **Planned** | `AGENTS.md`; skills in `.agents/skills`; custom agents as TOML files in `.codex/agents/` with `name`, `description`, `developer_instructions` and optional `model` |
 | OpenCode | **Planned** | Agents as Markdown in `.opencode/agents/` with `mode: subagent` and `model: provider/model`; commands in `.opencode/commands/`; subagents inherit the parent's model if none is set |
 | Cursor | **Planned** | Rules and `AGENTS.md`; skills; subagents as Markdown in `.cursor/agents/` with `model: inherit` or a model id; hooks in `hooks.json` |
+
+Automatic context is available only through Claude Code hooks. Another adapter can offer it by calling the same core functions from its own hook mechanism. Until that is built and tested, those platforms use `rmc context` and `rmc refresh` by hand.
 
 The platform mechanisms above come from each platform's documentation and were **not** tested with RM Context. They are design inputs for the planned adapters, not compatibility claims. Platforms change quickly, so re-check them before building an adapter.
 

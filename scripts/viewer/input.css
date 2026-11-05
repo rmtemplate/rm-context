@@ -1,0 +1,59 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Design tokens (RGB channels so Tailwind opacity modifiers work). */
+:root {
+  --bg: 250 250 251; --panel: 255 255 255; --raised: 244 244 247; --fg: 22 22 29; --muted: 98 98 110; --faint: 146 146 158;
+  --line: 230 230 236; --hover: 241 241 245; --accent: 91 76 240; --accent-fg: 255 255 255; --accent-soft: 236 235 253;
+  --danger: 201 60 60; --warn: 180 110 10; --ok: 34 140 90;
+  --l-business: 217 130 43; --l-system: 109 94 245; --l-engineering: 43 143 208; --l-infrastructure: 47 158 107; --l-project: 207 70 119;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: 15 15 20; --panel: 22 22 29; --raised: 30 30 39; --fg: 233 233 239; --muted: 163 163 176; --faint: 112 112 126;
+    --line: 42 42 52; --hover: 33 33 43; --accent: 147 137 255; --accent-fg: 15 15 20; --accent-soft: 37 34 74;
+    --danger: 239 107 107; --warn: 230 170 70; --ok: 85 192 141;
+    --l-business: 238 160 90; --l-system: 149 138 255; --l-engineering: 91 179 234; --l-infrastructure: 85 192 141; --l-project: 234 112 153;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: 15 15 20; --panel: 22 22 29; --raised: 30 30 39; --fg: 233 233 239; --muted: 163 163 176; --faint: 112 112 126;
+  --line: 42 42 52; --hover: 33 33 43; --accent: 147 137 255; --accent-fg: 15 15 20; --accent-soft: 37 34 74;
+  --danger: 239 107 107; --warn: 230 170 70; --ok: 85 192 141;
+  --l-business: 238 160 90; --l-system: 149 138 255; --l-engineering: 91 179 234; --l-infrastructure: 85 192 141; --l-project: 234 112 153;
+  color-scheme: dark;
+}
+
+@layer base {
+  html, body { height: 100%; }
+  body { @apply bg-bg text-fg font-sans text-[13px] leading-5 antialiased overflow-hidden; }
+  :focus-visible { @apply outline-none ring-2 ring-accent ring-offset-1 ring-offset-panel; }
+  a { @apply text-accent hover:underline; }
+  code { @apply font-mono text-[12px]; }
+}
+@layer components {
+  .btn { @apply inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md border border-line bg-panel text-fg text-[12px] hover:bg-hover disabled:opacity-40 cursor-pointer select-none whitespace-nowrap; }
+  .btn-icon { @apply btn w-8 px-0 justify-center; }
+  .btn.on { @apply bg-accent-soft text-accent border-accent/40; }
+  .chip { @apply inline-flex items-center gap-1 h-6 px-2 rounded-md border border-line bg-panel text-[11px] text-fg hover:bg-hover cursor-pointer whitespace-nowrap; }
+  .chip.off { @apply opacity-40; }
+  .badge { @apply inline-flex items-center h-5 px-1.5 rounded text-2xs font-medium bg-raised text-muted whitespace-nowrap; }
+  .b-extracted { @apply text-ok bg-ok/10; }
+  .b-inferred { @apply text-warn bg-warn/10; }
+  .b-manual { @apply text-accent bg-accent/10; }
+  .b-stale { @apply text-danger bg-danger/10; }
+  .card { @apply rounded-lg border border-line bg-panel; }
+  .h-sec { @apply text-2xs font-semibold uppercase tracking-wider text-faint; }
+  .input { @apply h-8 w-full rounded-md border border-line bg-bg px-2.5 text-[13px] text-fg placeholder:text-faint focus:border-accent; }
+  .row { @apply flex items-center gap-2 px-3 h-8 cursor-pointer hover:bg-hover text-left w-full; }
+  .row.on { @apply bg-accent-soft text-accent; }
+  .tbl { @apply w-full text-[12.5px] border-collapse; }
+  .tbl th { @apply sticky top-0 bg-panel text-left font-semibold text-muted px-3 py-2 border-b border-line whitespace-nowrap; }
+  .tbl td { @apply px-3 py-1.5 border-b border-line align-top; }
+  .tbl tr.click { @apply cursor-pointer hover:bg-hover; }
+  .icon { @apply w-4 h-4 shrink-0; }
+  .dot { @apply inline-block w-2 h-2 rounded-full shrink-0; }
+}

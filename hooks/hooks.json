@@ -1,16 +1,17 @@
 {
-  "description": "Expose the RM Context CLI path to Bash commands run by the session and its subagents.",
+  "description": "RM Context automatic context: compact session summary, relevant knowledge per prompt, and one incremental refresh per turn after file changes. Deterministic; no model calls.",
   "hooks": {
     "SessionStart": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "if [ -n \"$CLAUDE_ENV_FILE\" ]; then printf 'export RMC_CLI=\"%s/scripts/rmc.mjs\"\\n' \"${CLAUDE_PLUGIN_ROOT}\" >> \"$CLAUDE_ENV_FILE\"; fi; exit 0",
-            "timeout": 5
-          }
-        ]
-      }
+      { "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/hooks.mjs\" session-start", "timeout": 15 } ] }
+    ],
+    "UserPromptSubmit": [
+      { "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/hooks.mjs\" prompt", "timeout": 10 } ] }
+    ],
+    "PostToolUse": [
+      { "matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash", "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/hooks.mjs\" post-tool", "timeout": 5 } ] }
+    ],
+    "Stop": [
+      { "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/hooks.mjs\" stop", "timeout": 60 } ] }
     ]
   }
 }

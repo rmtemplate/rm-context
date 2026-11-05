@@ -1,5 +1,41 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **Smart project viewer.** A new single-file offline viewer.
+  - Tailwind CSS compiled at build time and inlined (no CDN), with design tokens for light and dark themes.
+  - A sidebar with inline Lucide-compatible icons. Sections without data are hidden.
+  - Responsive: icon rail on tablets, drawer and bottom-sheet details on phones.
+  - Hash routing and keyboard navigation.
+- **File explorer.** A virtualized tree with lazy folders. Each file shows symbols, imports and their resolution, importers, routes, tables, external calls, callers, callees, requirements, tests, documents and evidence, each labelled Extracted or Inferred.
+- **Explorers** for modules, functions and classes, dependencies, APIs, database, infrastructure, integrations and business requirements. Also new pages for agent hand-offs, notes, search, context status and settings.
+- **Eight graph views** (Project, Module, File dependency, Function call, API, Database, Infrastructure, Traceability) plus Everything. Tools:
+  - find in graph, type and provenance filters
+  - focus on a neighbourhood of 1–3 hops, with the option to hide unrelated nodes
+  - shortest-path tracing and change impact, using the same rules as `rmc impact`
+  - back and breadcrumb history
+  - an accessible list view
+- **Graph performance.**
+  - Canvas rendering with batched paths and viewport culling.
+  - Graphs over 1,200 nodes start as module clusters.
+  - Deterministic typed-array layout in a Web Worker, with a synchronous fallback. Layouts are cached per view.
+  - Indexed, debounced search.
+  - At 10,000 nodes (headless Edge): layout 1,406 → 284 ms (synchronous worst case), redraw 14.2 → 3.9 ms, search 11.9 → 4.9 ms, select 43 → 18 ms. Load time rose from 202 to 349 ms because more data is embedded.
+- **Automatic context (Claude Code hooks).**
+  - `SessionStart` adds a compact summary.
+  - `UserPromptSubmit` adds deterministic, budgeted retrieval: 1,200 tokens by default, nothing for irrelevant prompts.
+  - `PostToolUse` records file changes.
+  - `Stop` runs one coalesced incremental refresh. It uses git status or fingerprints, never a full scan, and never loops on `.rmcontext/` writes.
+  - Approved documents are flagged for review, never rewritten.
+  - Configure it with `autoContext` in `.rmcontext/config.json`. Disable it with `"enabled": false` or `RMC_AUTO_CONTEXT=0`.
+- `rmc context "<prompt>"` and `rmc context status` diagnostics.
+- `rmc refresh` reports a graph delta and short-circuits when nothing changed.
+
+### Changed
+- `graph.html` now opens `index.html#/graph`. Old `#graph`-style links still work.
+- `RMC_CLI` is exported with forward slashes, so it works when sourced by bash on Windows.
+
 ## 0.3.0 — 2026-11-06
 
 Evolves RM Context from a prompt-only codebase-notes plugin into a platform-independent project intelligence toolkit for AI coding agents, with Claude Code as the first supported integration.

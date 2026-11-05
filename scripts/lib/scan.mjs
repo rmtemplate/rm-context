@@ -300,7 +300,8 @@ export function writeGenerated(file, body) {
   return 'updated';
 }
 
-export function scan(root, { full = false } = {}) {
+// only: re-read just these repository-relative paths (new and deleted files are still detected); null = check every file.
+export function scan(root, { full = false, only = null } = {}) {
   const t0 = Date.now();
   const c = ctx(root);
   const config = loadConfig(c);
@@ -311,7 +312,9 @@ export function scan(root, { full = false } = {}) {
   const seen = new Set(files);
   const added = [], changed = [], deleted = [];
   let skippedBinary = 0;
+  const onlySet = only && !full ? new Set(only) : null;
   for (const rel of files) {
+    if (onlySet && cache[rel] && !onlySet.has(rel)) continue;
     const abs = path.join(root, rel);
     const st = fs.statSync(abs);
     const prev = cache[rel];
@@ -326,6 +329,19 @@ export function scan(root, { full = false } = {}) {
     (prev ? changed : added).push(rel);
   }
   for (const rel of Object.keys(cache)) if (!seen.has(rel)) { deleted.push(rel); delete cache[rel]; }
+  const mode = !reuse ? 'full' : onlySet ? 'targeted' : 'incremental';
+  if (reuse && !added.length && !changed.length && !deleted.length && fs.existsSync(c.nodes) && !migrateGraph(loadGraph(c)).length) {
+    // Nothing changed: the graph, index and documents stay untouched; only the scan record is updated.
+    writeJson(c.files, { extractorVersion: EXTRACTOR_VERSION, files: cache });
+    const manifest = readJson(c.manifest, {});
+    manifest.scan = { ...manifest.scan, timestamp: now(), mode };
+    writeJson(c.manifest, manifest);
+    const report = { ...readJson(c.scan, {}), timestamp: now(), mode, unchanged: true, durationMs: Date.now() - t0,
+      files: { indexed: Object.keys(cache).length, added: 0, changed: 0, deleted: 0 }, changedFiles: [], excluded: { ...excluded, binaryContent: skippedBinary },
+      delta: { nodesAdded: 0, nodesRemoved: 0, nodesChanged: 0, edgesAdded: 0, edgesRemoved: 0 }, staleAgentItems: 0, orphanedAgentEdges: [], migration: [] };
+    writeJson(c.scan, report);
+    return report;
+  }
 
   const project = projectInfo(root, cache);
   const old = loadGraph(c);
@@ -347,6 +363,13 @@ export function scan(root, { full = false } = {}) {
   for (const item of [...agentNodes, ...agentEdges]) if ((item.evidence || []).some((e) => touched.has(e.file))) { item.stale = true; staleCount++; }
   const graph = { nodes, edges: [...scanned.edges, ...agentEdges.filter((e) => !scanEdgeIds.has(e.id))] };
   saveGraph(c, graph);
+  const before = new Map(old.nodes.map((n) => [n.id, JSON.stringify(n)]));
+  const oldEdges = new Set(old.edges.map((e) => e.id)), newEdges = new Set(graph.edges.map((e) => e.id));
+  const delta = { nodesAdded: 0, nodesRemoved: 0, nodesChanged: 0, edgesAdded: 0, edgesRemoved: 0 };
+  for (const n of graph.nodes) { const b = before.get(n.id); if (b === undefined) delta.nodesAdded++; else if (b !== JSON.stringify(n)) delta.nodesChanged++; before.delete(n.id); }
+  delta.nodesRemoved = before.size;
+  for (const id of newEdges) if (!oldEdges.has(id)) delta.edgesAdded++;
+  for (const id of oldEdges) if (!newEdges.has(id)) delta.edgesRemoved++;
 
   const commit = git(root, ['rev-parse', 'HEAD']);
   const stack = detectStack(cache, Object.keys(cache));
@@ -354,12 +377,12 @@ export function scan(root, { full = false } = {}) {
   Object.assign(manifest, {
     schemaVersion: SCHEMA_VERSION, generator: GENERATOR, project, stack,
     createdAt: manifest.createdAt || now(), updatedAt: now(),
-    scan: { timestamp: now(), commit, mode: reuse ? 'incremental' : 'full' },
+    scan: { timestamp: now(), commit, mode },
   });
   writeJson(c.manifest, manifest);
   writeJson(c.files, { extractorVersion: EXTRACTOR_VERSION, files: cache });
   const report = {
-    timestamp: now(), commit, mode: reuse ? 'incremental' : 'full', durationMs: Date.now() - t0,
+    timestamp: now(), commit, mode, durationMs: Date.now() - t0, delta,
     files: { indexed: Object.keys(cache).length, added: added.length, changed: changed.length, deleted: deleted.length },
     changedFiles: [...added, ...changed, ...deleted].slice(0, 200),
     excluded: { ...excluded, binaryContent: skippedBinary },

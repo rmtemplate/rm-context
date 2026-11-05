@@ -24,6 +24,8 @@ Core
   route --escalate <R-id> --reason "…" [--handoff H-id]   Next tier for the same agent, reusing its hand-off
   route categories | stats [--json]
   handoff add <file.json> | list [--to agent]
+  context <prompt…> [--max-tokens N] [--json]   Relevant knowledge for a task, within a token budget
+  context --session | status [--json]           Session summary · automatic-context diagnostics
 
 Documents
   doc types [--json]               List templates (with owning agent)
@@ -166,6 +168,15 @@ async function main(argv) {
         escalate: args.escalate, reason: typeof args.reason === 'string' ? args.reason : undefined, record: !args['no-record'] });
       return out(args.json ? r : R.formatRoute(r));
     }
+    case 'context': {
+      requireInit(c);
+      const X = await import('./lib/context.mjs');
+      if (sub === 'status') { const st = X.contextStatus(c); return out(args.json ? st : X.formatContextStatus(st)); }
+      if (args.session) return out(X.sessionSummary(c, path.join(PLUGIN_ROOT, 'scripts', 'rmc.mjs')) || '(session context disabled)');
+      const prompt = [sub, ...rest].filter(Boolean).join(' ') || fail('Usage: rmc context <prompt…> | --session | status');
+      const r = X.retrieve(c, prompt, args['max-tokens'] ? { maxContextTokens: Number(args['max-tokens']) } : {});
+      return out(args.json ? r : r.text || `No sufficiently relevant knowledge (searched ${r.terms} term(s)).`);
+    }
     case 'handoff': {
       requireInit(c);
       const { addHandoff, listHandoffs } = await import('./lib/project.mjs');
@@ -192,8 +203,8 @@ function scanSummary(r) {
   const f = r.files, x = r.excluded;
   return [`Scan (${r.mode}) in ${r.durationMs} ms: ${f.indexed} files indexed — ${f.added} added, ${f.changed} changed, ${f.deleted} deleted.`,
     `Excluded: ${x.secret} secret/credential files, ${x.ignored} ignored, ${x.binary + x.binaryContent} binary, ${x.large} oversized.`,
-    `Graph: ${r.graph.nodes} nodes, ${r.graph.edges} edges.${r.staleAgentItems ? ` ${r.staleAgentItems} agent-authored item(s) marked stale.` : ''}${r.orphanedAgentEdges.length ? ` ${r.orphanedAgentEdges.length} orphaned agent edge(s) removed.` : ''}`,
-    ...(r.migration.length ? [`Migrated ${r.migration.length} legacy graph item(s).`] : [])].join('\n');
+    r.unchanged ? 'No changes since the last scan; graph untouched.' : `Graph: ${r.graph.nodes} nodes, ${r.graph.edges} edges.${r.staleAgentItems ? ` ${r.staleAgentItems} agent-authored item(s) marked stale.` : ''}${r.orphanedAgentEdges.length ? ` ${r.orphanedAgentEdges.length} orphaned agent edge(s) removed.` : ''}`,
+    ...(r.migration?.length ? [`Migrated ${r.migration.length} legacy graph item(s).`] : [])].join('\n');
 }
 
 // Agents locate the CLI from this local (uncommitted) file when no path was given to them.

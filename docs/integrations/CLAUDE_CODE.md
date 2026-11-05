@@ -19,7 +19,7 @@ Restart Claude Code when prompted. Commands are available as `/rm-context:<name>
 | `agents/*.md` | Nine agents: business-analyst, system-analyst, project-manager, senior-engineer, devops-engineer, architecture, qa, documentation, quick-qa |
 | `skills/*/SKILL.md` | The team contract (`team-workflows`), the role playbooks and the documentation engine. Agents preload them through the `skills` frontmatter |
 | `commands/*.md` | 29 slash commands. Each calls the core CLI through `${CLAUDE_PLUGIN_ROOT}/scripts/rmc.mjs` |
-| `hooks/hooks.json` | A SessionStart hook that exports `RMC_CLI`, so agents can locate the CLI |
+| `hooks/hooks.json` | Automatic context through four hooks. `SessionStart` adds a compact summary and exports `RMC_CLI` so agents can locate the CLI. `UserPromptSubmit` adds relevant knowledge within a token budget. `PostToolUse` records file changes, and `Stop` runs one incremental refresh. See the README's [Automatic context](../../README.md#automatic-context-claude-code) section. |
 
 ## Agent routing
 

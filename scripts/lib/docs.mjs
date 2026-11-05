@@ -334,7 +334,7 @@ th{background:var(--code)}code{background:var(--code);padding:1px 4px;border-rad
 a{color:var(--accent)}blockquote{border-left:3px solid var(--accent);margin:8px 0;padding:2px 12px;color:var(--muted)}
 .mermaid{background:transparent}@media print{body{margin:0;max-width:none}table{display:table}}`;
 
-function findChrome() {
+export function findChrome() {
   const env = process.env.RMC_CHROME;
   const cands = [env, 'chromium', 'chromium-browser', 'google-chrome', 'google-chrome-stable', 'microsoft-edge',
     '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
@@ -348,7 +348,7 @@ function findChrome() {
   return null;
 }
 // Windows browsers launched from WSL need Windows paths.
-const hostPath = (bin, p) => (bin.startsWith('/mnt/') ? spawnSync('wslpath', ['-w', p], { encoding: 'utf8' }).stdout.trim() : p);
+export const hostPath = (bin, p) => (bin.startsWith('/mnt/') ? spawnSync('wslpath', ['-w', p], { encoding: 'utf8' }).stdout.trim() : p);
 
 function exportDoc(c, ref, format) {
   const { d } = findDoc(c, ref);

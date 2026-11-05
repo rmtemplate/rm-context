@@ -39,7 +39,8 @@ The core is a dependency-free Node.js CLI that works with any editor or agent. P
 | Knowledge graph | 38 node types across business, system, engineering, infrastructure and project layers; 12 relationship types; impact analysis; traceability |
 | Documents | 49 templates with validation, versions, an approval gate, and HTML, PDF and DOCX export |
 | Project management | Plan validation, Gantt chart, critical path, WBS, roadmap, progress based on evidence, health report |
-| Viewer | Offline HTML with graph, layer, project and document views |
+| Viewer | Offline single-file project viewer: overview, file explorer, code, API and database explorers, eight graph views for large graphs |
+| Automatic context | Claude Code hooks add a compact project summary per session, relevant knowledge per prompt, and one incremental refresh per turn |
 | Routing | Task category → default agent and model tier, with escalation and metrics |
 
 ## Supported AI platforms
@@ -132,6 +133,37 @@ rmc route categories            # categories, tiers and signals
 
 `rmc init` creates `.rmcontext/` in your repository. `rmc refresh` re-reads only changed files. Knowledge and documents linked to those files are flagged for review. Commit the folder so your whole team and every agent share the same context.
 
+## Automatic context (Claude Code)
+
+In Claude Code the plugin keeps the agent informed without extra commands. Four hooks drive it:
+
+| Hook | What happens |
+|---|---|
+| `SessionStart` | Adds a compact summary: project, stack, last scan, graph size, pending changes. About 100–250 tokens. |
+| `UserPromptSubmit` | Finds the modules, APIs, functions, tables, tests, infrastructure, documents and notes relevant to the prompt and adds them with source locations. The default limit is 1,200 tokens. Prompts that match nothing add nothing. |
+| `PostToolUse` | Records files changed by `Write`, `Edit`, `MultiEdit` or `NotebookEdit`, or by a Bash command that may change files. Read-only commands are ignored. |
+| `Stop` | Runs one incremental refresh for everything changed in the turn. Changed files are found from the recorded paths, `git status`, or file fingerprints in non-git projects. You see a one-line summary, e.g. `RM Context updated · 2 file(s) · modules: src/services · graph +1/~1/-0 nodes … · full scan not required`. |
+
+What the hooks never do:
+- call a model
+- scan the whole repository for a prompt
+- store prompt text
+- inject anything that looks like a secret
+- rewrite approved documents
+
+Documents whose sources changed are only marked for review. Changes to `.rmcontext/` never trigger a refresh, so the refresh cannot loop. Without `.rmcontext/`, the session summary suggests `/rm-context:init`, and nothing is scanned automatically.
+
+Adjust it in `.rmcontext/config.json`:
+
+```json
+{ "autoContext": { "enabled": true, "sessionStart": true, "promptRetrieval": true, "incrementalRefresh": true,
+                   "maxContextTokens": 1200, "sessionContextTokens": 250, "maxResults": 8, "minimumRelevance": 0.45 } }
+```
+
+To turn it off, set `"enabled": false` or set the environment variable `RMC_AUTO_CONTEXT=0`. The CLI and commands keep working. `rmc context status` shows usage, average tokens and latency, the last refresh, and hook errors. `rmc context "<prompt>"` shows what would be added for a prompt.
+
+These hooks exist only in Claude Code. Other platforms can run the same retrieval by hand with `rmc context`.
+
 ## Knowledge graph and viewer
 
 - **Graph layers:**
@@ -141,7 +173,40 @@ rmc route categories            # categories, tiers and signals
   - **Infrastructure:** containers, services, pipelines, environments
   - **Project:** milestones, tasks, risks, decisions, documents
 - **Relationships:** `belongs_to`, `implements`, `depends_on`, `calls`, `reads_from`, `writes_to`, `integrates_with`, `deployed_on`, `tested_by`, `satisfies`, `blocks`, `related_to`.
-- **Viewer:** `rmc viewer --open` builds one offline HTML file. It has overview, graph, business, system, code, infrastructure, project and documents views. You can search, filter by type and confidence, follow evidence links (including into VS Code), highlight impact, and switch between light and dark themes.
+### Project viewer
+
+`rmc viewer --open` builds `.rmcontext/viewer/index.html`. It is one file that opens offline: the CSS is compiled in, and nothing is loaded from the network.
+
+- **Navigation:**
+  - The sidebar groups sections into Workspace, Code Intelligence, Architecture, Project Knowledge and Utilities. Sections without data are hidden.
+  - On a tablet the sidebar collapses to icons. On a phone it becomes a drawer, and details open as a bottom sheet.
+  - Keyboard: `/` searches and `Esc` closes. Arrow keys move through the tree and lists.
+- **Overview:** real counts (files, lines, modules, functions, APIs, tables, tests), the share of extracted and inferred relationships, the stack, the largest modules, and freshness: last scan, last automatic refresh, stale items and documents needing review.
+- **File explorer:**
+  - A virtualized tree with lazy folders.
+  - For each file: symbols, imports and what they resolve to, importers, routes, tables, external calls, callers, callees, requirements, tests, documents and evidence.
+  - Every relationship is labelled **Extracted** (read from source) or **Inferred** (a heuristic to verify).
+- **Explorers:** Modules, Functions & Classes, Dependencies, APIs, Database, Infrastructure, Integrations and Business Requirements, plus Technical Documents, Project Management (Gantt), Agent Handoffs, Notes, Search, Context Status and Settings.
+- **Graph views:** Project, Module, File dependency, Function call, API, Database, Infrastructure, Traceability and Everything.
+- **Graph tools:**
+  - Find in graph, type filters and provenance filters.
+  - Zoom, pan, fit and reset.
+  - Focus on a neighbourhood of 1–3 hops, with an option to hide unrelated nodes.
+  - Shortest-path tracing, change impact (same rules as `rmc impact`), and back and breadcrumb history.
+  - An accessible list view as an alternative to the canvas.
+- **Large graphs:**
+  - Rendering is on canvas. Graphs over 1,200 nodes start as module clusters; click a cluster to expand it.
+  - Layout is deterministic. It runs in a Web Worker (synchronous fallback) and is cached per view.
+  - Search uses a prefix index. Only what is on screen is drawn.
+
+Measured in headless Edge on synthetic graphs (old viewer → new viewer):
+
+| Graph | Layout | Redraw | Search | Select | Load |
+|---|---|---|---|---|---|
+| 2,000 nodes | 200 → 90 ms | 4.0 → 1.6 ms | 3.5 → 1.2 ms | 20 → 18 ms | 82 → 125 ms |
+| 10,000 nodes | 1,406 → 284 ms | 14.2 → 3.9 ms | 11.9 → 4.9 ms | 43 → 18 ms | 202 → 349 ms |
+
+The layout figures are the synchronous worst case. In normal use the layout runs off the main thread, and reopening a view uses the cached layout (1–2 ms). A 10,000-node graph first appears as 86 module clusters in about 40 ms. Load time is higher than before because the viewer now embeds file details, notes and hand-offs.
 
 ## Documentation engine
 
@@ -452,6 +517,7 @@ Run `rmc help` for the full reference. All commands run in the current directory
 | `rmc pm init \| validate \| progress \| gantt \| mermaid \| health` | Plan, Gantt and health |
 | `rmc routing` · `rmc route …` | Agent defaults; adaptive model choice, escalation, stats |
 | `rmc handoff add <file.json> \| list [--to agent]` | Structured hand-offs between roles |
+| `rmc context "<prompt>" [--max-tokens n] [--json]` · `rmc context status` | Preview the knowledge added for a prompt; automatic-context diagnostics |
 
 ## Claude Code commands
 
@@ -484,6 +550,7 @@ To approve a document, say so in chat, e.g. *"Approve FSD-001, approved by Jane 
 | `maxFileBytes` | Files larger than this are skipped |
 | `routing` | Overrides plugin routing settings, e.g. `{ "enabled": false }` or `{ "maxEscalations": 2 }` |
 | `tiers` | Overrides the tier → model mapping, e.g. `{ "medium": "opus" }` |
+| `autoContext` | Automatic context settings for Claude Code. See [Automatic context](#automatic-context-claude-code) |
 
 **Plugin defaults: `config/models.json`.**
 
@@ -512,7 +579,7 @@ The same file also holds:
 ├── graph/                nodes.json · edges.json
 ├── viewer/               index.html (opens offline)
 ├── references/           linked projects
-├── state/                scan report · hand-offs · routing metrics · local cache
+├── state/                scan report · hand-offs · routing metrics · local cache · last refresh · auto-context log (metadata only)
 └── .local/               machine-specific paths (git-ignored)
 ```
 
@@ -529,7 +596,8 @@ The same file also holds:
 - **Refused:** graph writes and documents that contain secret-like content (keys, tokens, passwords in connection strings).
 - **Your text is preserved.** Generated sections are fenced by markers; text outside them, and files without markers, are never overwritten.
 - **Approval is yours.** Documents become Approved only with an explicit `--approved-by`.
-- **Routing metrics hold metadata only.** No prompts and no source code are stored.
+- **Routing metrics and the auto-context log hold metadata only.** No prompt text and no source code are stored.
+- **Injected context and the viewer are filtered.** Lines that look like credentials are dropped from prompt context, and from the notes and hand-offs embedded in the viewer.
 
 ## Compatibility matrix
 
@@ -547,7 +615,9 @@ The same file also holds:
 | Professional agents | — | Supported | Planned | Planned | Planned |
 | Automatic agent routing | — | Supported | Planned | Planned | Planned |
 | Adaptive model routing | Recommendation only | Supported (subagents) | Planned | Planned | Planned |
-| Hooks and session integration | — | Supported (SessionStart) | Planned | Planned | Planned |
+| Hooks and session integration | — | Supported (SessionStart, UserPromptSubmit, PostToolUse, Stop) | Planned | Planned | Planned |
+| Automatic context per prompt | Manual (`rmc context`) | Supported | Planned | Planned | Planned |
+| Automatic incremental refresh | Manual (`rmc refresh`) | Supported | Planned | Planned | Planned |
 | Installation | `git clone` | Plugin marketplace | Manual CLI | Manual CLI | Manual CLI |
 
 ¹ You run the CLI yourself in a terminal, and the platform reads the generated files. There is no adapter and it has not been tested inside the platform.
@@ -559,14 +629,15 @@ The same file also holds:
 - **Business intent comes from agents or people.** It is never inferred automatically from code.
 - **The model is applied only where the platform supports it.** No integration changes your main session's model.
 - **External tools for some exports.** PDF needs Chrome, Chromium or Edge (or set `RMC_CHROME`). DOCX needs pandoc. Mermaid in HTML exports needs network access to render.
-- **The viewer is a snapshot.** Rebuild it after a refresh. It works best up to a few thousand nodes.
+- **The viewer is a snapshot.** Rebuild it after a refresh. It was measured up to 10,000 nodes. Rendering every node of a very large view at once is slower than the module-cluster default.
+- **Prompt retrieval is lexical.** It matches identifiers, paths and a built-in list of synonyms, including Indonesian terms. It does not understand meaning the way a model does.
 
 ## Roadmap
 
 - Adapters for OpenAI Codex, OpenCode and Cursor, following [the integration architecture](docs/INTEGRATION_ARCHITECTURE.md).
 - Parser-based extractors for more precise routes and call graphs.
 - A packaged CLI install.
-- Viewer performance for very large graphs.
+- Automatic context for other platforms, where they offer equivalent hooks.
 
 ## Contributing
 
