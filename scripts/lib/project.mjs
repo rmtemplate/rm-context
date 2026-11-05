@@ -41,7 +41,7 @@ export function resolveRouting(c) {
   return { rows, fallback: defaults.fallback, warnings };
 }
 export function formatRouting(r) {
-  return ['Agent model routing (pass `model` when delegating; on an unavailable-model error retry per fallback):', '',
+  return ['Agent default models (used when a delegation has no task category; with a category, rmc route picks the tier):', '',
     '| Agent | Model | Source | Reason |', '|---|---|---|---|',
     ...r.rows.map((x) => `| ${x.agent} | ${x.model} | ${x.source} | ${x.reason} |`), '',
     `Fallback: ${r.fallback.join(' → ')}`, 'Subagent models never change the main session model.',
@@ -250,6 +250,12 @@ export function validateAll(c) {
     if (conf.ignore && !Array.isArray(conf.ignore)) cfg.errors.push('config.ignore must be an array of gitignore patterns');
     const routing = resolveRouting(c);
     cfg.warnings.push(...routing.warnings);
+    const TIERS = ['low', 'medium', 'high'];
+    for (const [k, v] of Object.entries(conf.tiers || {})) {
+      if (!TIERS.includes(k)) cfg.errors.push(`config.tiers.${k}: tiers are ${TIERS.join(', ')}`);
+      else if (typeof v !== 'string') cfg.errors.push(`config.tiers.${k} must be a model alias or claude-* id`);
+    }
+    for (const k of ['defaultTier', 'fallbackTier']) if (conf.routing?.[k] && !TIERS.includes(conf.routing[k])) cfg.errors.push(`config.routing.${k} must be one of ${TIERS.join(', ')}`);
   } catch (e) { cfg.errors.push(e.message); }
   r.config = cfg;
   try { r.graph = G.validateGraph(G.loadGraph(c)); } catch (e) { r.graph = { errors: [e.message], warnings: [] }; }

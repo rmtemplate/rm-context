@@ -12,8 +12,7 @@ Run **workflow A (new project discovery)** for: $ARGUMENTS
 Project status:
 !`node "${CLAUDE_PLUGIN_ROOT}/scripts/rmc.mjs" status 2>&1 | head -12`
 
-Routing for every role:
-!`node "${CLAUDE_PLUGIN_ROOT}/scripts/rmc.mjs" routing 2>&1`
+Model routing: before each step, run `rmc route --agent <role> --category <category> --workflow <slug> [--signals …] [--handoff <H-id of the previous step>]` and pass its `model`. Each step is routed on its own, so the same role can get a different model for a different step. See *Model routing* in the `team-workflows` skill.
 
 Follow workflow A in the `team-workflows` skill, step by step. Run the steps **sequentially**: each role consumes the previous role's hand-off.
 1. If the status above says RM Context is not initialized, run `rmc init` first and show its summary. An empty repository is fine.
@@ -29,4 +28,4 @@ Follow workflow A in the `team-workflows` skill, step by step. Run the steps **s
    - top risks
    - every open question that needs the user
 
-Delegation rules: follow the `team-workflows` skill. Pass the routed `model` when you delegate. If it fails because the model is unavailable, retry once with your own model alias. In the delegation prompt, include the user's request verbatim, the exact `rmc` command line above, relevant ids and paths from `rmc find`, and related hand-off ids. Do not spawn other roles unless this command says to.
+Delegation rules: follow the `team-workflows` skill. Pass the `model` from `rmc route` when you delegate. If it fails because the model is unavailable, retry once with your own model alias. If the agent shows the task is harder than classified, escalate once with `rmc route --escalate <R-id> --reason "<new evidence>" --handoff <H-id>` instead of restarting the work. In the delegation prompt, include the user's request verbatim, the exact `rmc` command line above, relevant ids and paths from `rmc find`, and related hand-off ids. Do not spawn other roles unless this command says to.

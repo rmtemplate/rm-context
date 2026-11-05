@@ -22,7 +22,7 @@ Below, `rmc` means that command line. Never hand-edit `graph/*.json`, `documents
 |---|---|
 | Orient | `rmc status` · read `.rmcontext/INDEX.md` |
 | Find knowledge | `rmc find <terms>` · `rmc graph node "<id>"` |
-| Record knowledge | write a JSON payload file, then `rmc graph upsert <file>` (delete the temp file after) |
+| Record knowledge | write a JSON payload file under `.rmcontext/.local/` (git-ignored), then `rmc graph upsert <file>`. Never leave scratch files in the project |
 | Change impact | `rmc impact "<id or file>"` · `rmc impact --changed` |
 | Traceability | `rmc rtm` |
 | Documents | `rmc doc new <type> --title "…" --author <you> [--nodes a,b] [--sources path,…]` → edit the file → `rmc doc validate <id>` |
@@ -98,6 +98,8 @@ When you finish a step that another role continues, record a hand-off (`rmc hand
   "assumptions": ["Email verification is not required for MVP"], "openQuestions": ["Who owns GDPR deletion requests?"] }
 ```
 
+If the task turns out harder than it was described (security impact, architectural change, an unknown root cause), stop at what you have verified. Record a hand-off to `orchestrator` with your findings, and say so in your reply. The orchestrator can re-delegate with a stronger model, which continues from your hand-off.
+
 Before you start, read `rmc handoff list --to <your-agent-name>` and the artifacts it names. If an upstream assumption conflicts with evidence you find, do not silently diverge. Record a question and tell the orchestrator.
 
 ## 5. Your final reply to the orchestrator
@@ -111,10 +113,62 @@ End every task with a compact report:
 ## 6. Orchestration (main session)
 
 - **Delegate only when needed.** One role per step; never spawn every agent "to be thorough". Answer simple questions yourself or with `quick-qa`.
-- **Resolve the model** with `rmc routing` and pass the `model` parameter when delegating. If delegation fails because a model is unavailable, retry once passing your own model's alias (that is what `inherit` means). A subagent's model never changes the main session's model.
+- **Choose the agent and the model separately.** The agent follows the work (an FSD goes to the BA). The model follows the difficulty of this particular task. See *Model routing* below.
 - **Pass context, not instructions to rediscover it.** Give the agent the request, the `rmc` command line, relevant ids and paths, and the upstream hand-off ids.
 - Run steps **sequentially** when a later role consumes an earlier role's output. Run in parallel only when steps are independent (e.g. DevOps assessment alongside the SA's API mapping).
 - After the workflow, run `rmc validate` and `rmc viewer`, and summarise for the user. Include what still needs a user decision.
+
+### Model routing
+
+Before each delegation, assess the task, then run:
+
+`rmc route --agent <agent> --category <category> [--signals s,s] [--workflow <slug>] [--handoff <H-id>]`
+
+Pass the returned `model` to the Agent tool. Show the user the routing block it prints; for low-tier tasks it prints a single line. `rmc route categories` lists the categories with their default tier and agent.
+
+**Signals.** Add only the ones that are true for this task:
+
+| Signal | Meaning | Effect |
+|---|---|---|
+| `security` | auth, payments, secrets, permissions | high |
+| `architecture` | architectural decision or redesign | high |
+| `irreversible` | hard to undo (data migration, public API break) | high |
+| `debugging` | root cause unknown, needs deep investigation | high |
+| `cross-module`, `modules:N` (N ≥ 3) | reasoning across modules | high |
+| `ambiguous`, `code`, `modules:2` | unclear requirement; modifies source | at least medium |
+| `trivial`, `retrieval` | one-line or low-risk change; lookup or transformation | low, unless a high signal or `ambiguous` is present |
+| `context` | verified context or a hand-off already covers it | recorded as context reuse |
+
+Do not treat every code change as high. A typo fix is `small-change` with `trivial`. A complex architecture document can be high with no code change.
+
+**Precedence:**
+1. The user named a model: `--model`.
+2. The project config `.rmcontext/config.json` sets `models.<agent>`.
+3. The plugin config `config/models.json` sets `agents.<agent>.override`.
+4. The adaptive tier from the category and signals.
+5. The agent's default model, when there is no category.
+
+An unsupported value falls back to `routing.fallbackTier`, and the CLI says so.
+
+**Escalation.** If the agent's result shows the task is harder than classified, have it record its findings with `rmc handoff add`. Then run `rmc route --escalate <R-id> --reason "<the new evidence>" --handoff <H-id>`, and re-delegate only that subtask to the same agent with the stronger model. Give it the hand-off and tell it to continue, not to redo the analysis.
+
+The CLI enforces the limits:
+- `maxEscalations` caps how many times a route can escalate.
+- A route that was already escalated cannot be escalated again.
+- A reason already used cannot be reused.
+- A model chosen by the user or fixed by configuration is never escalated.
+
+If the stronger model is blocked too, report to the user.
+
+**De-escalation.** When a task turns out simpler than it looked, route the remaining steps with `trivial` or `retrieval`, or answer directly. Don't keep delegating to the high tier.
+
+**Token economy:**
+- Delegate to the fewest agents that can do the job.
+- Pass ids, paths and hand-off ids rather than whole documents.
+- Reuse hand-offs instead of re-scanning.
+- Run `rmc refresh` only when files changed.
+
+**Main session.** `rmc route` sets the model of the delegated agent only. The main session's model never changes; only the user changes it, with `/model`. Never tell the user it was switched.
 
 ## 7. Workflows
 

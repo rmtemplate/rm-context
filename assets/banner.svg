@@ -1,10 +1,10 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 360" width="1280" height="360" role="img" aria-labelledby="t d">
-  <title id="t">RM Context</title><desc id="d">Your Project Intelligence, Connected.</desc>
+  <title id="t">RM Context</title><desc id="d">Your Project Intelligence Layer for AI Coding Agents.</desc>
   <rect width="1280" height="360" fill="#16161D"/>
   <!-- Graph field: same edge/node vocabulary as the mark, kept quiet -->
   <g stroke="#2E2E3A" stroke-width="2" fill="none">
     <path d="M760 70L880 120L1010 80L1150 140L1230 90"/><path d="M880 120L930 230L1060 260L1150 140"/>
-    <path d="M930 230L820 290"/><path d="M1060 260L1200 300"/><path d="M1010 80L1060 260"/><path d="M760 70L820 290"/>
+    <path d="M930 230L820 290"/><path d="M1060 260L1200 300"/><path d="M1010 80L1060 260"/>
   </g>
   <g fill="#2E2E3A"><circle cx="760" cy="70" r="6"/><circle cx="1010" cy="80" r="6"/><circle cx="1230" cy="90" r="6"/><circle cx="820" cy="290" r="6"/><circle cx="1200" cy="300" r="6"/><circle cx="1150" cy="140" r="7"/><circle cx="1060" cy="260" r="7"/></g>
   <circle cx="880" cy="120" r="8" fill="#3B3570"/><circle cx="930" cy="230" r="9" fill="#7C6FF7"/>
@@ -15,6 +15,6 @@
   <circle cx="46" cy="50" r="9" fill="#7C6FF7" stroke="#23232D" stroke-width="3"/>
   </g>
   <text x="280" y="170" font-family="Inter, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="64" font-weight="700" letter-spacing="-1.2" fill="#FFFFFF">RM<tspan font-weight="500" dx="14">Context</tspan></text>
-  <text x="282" y="222" font-family="Inter, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="26" font-weight="400" fill="#A9A9B8">Your Project Intelligence, Connected.</text>
+  <text x="282" y="222" font-family="Inter, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="24" font-weight="400" fill="#A9A9B8">Your Project Intelligence Layer for AI Coding Agents.</text>
   <text x="282" y="262" font-family="Inter, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="16" font-weight="500" letter-spacing="1.6" fill="#7C6FF7">BUSINESS · SYSTEM · CODE · INFRASTRUCTURE · DELIVERY</text>
 </svg>

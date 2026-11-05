@@ -12,8 +12,7 @@ Run **workflow C (existing project assessment)**. Focus: $ARGUMENTS
 Project status:
 !`node "${CLAUDE_PLUGIN_ROOT}/scripts/rmc.mjs" status 2>&1 | head -12`
 
-Routing:
-!`node "${CLAUDE_PLUGIN_ROOT}/scripts/rmc.mjs" routing 2>&1`
+Model routing: before each step, run `rmc route --agent <role> --category <category> --workflow <slug> [--signals …] [--handoff <H-id of the previous step>]` and pass its `model`. Each step is routed on its own, so the same role can get a different model for a different step. See *Model routing* in the `team-workflows` skill.
 
 Follow workflow C in the `team-workflows` skill.
 1. Run `rmc init`, or `rmc refresh` if already initialized. If `context/architecture.md` is missing, delegate to **architecture** to write the context notes.
@@ -27,4 +26,4 @@ Follow workflow C in the `team-workflows` skill.
 
 Steps 4 and 5 are independent and may run in parallel. Everything else is sequential.
 
-Delegation rules: follow the `team-workflows` skill. Pass the routed `model` when you delegate. If it fails because the model is unavailable, retry once with your own model alias. In the delegation prompt, include the user's request verbatim, the exact `rmc` command line above, relevant ids and paths from `rmc find`, and related hand-off ids. Do not spawn other roles unless this command says to.
+Delegation rules: follow the `team-workflows` skill. Pass the `model` from `rmc route` when you delegate. If it fails because the model is unavailable, retry once with your own model alias. If the agent shows the task is harder than classified, escalate once with `rmc route --escalate <R-id> --reason "<new evidence>" --handoff <H-id>` instead of restarting the work. In the delegation prompt, include the user's request verbatim, the exact `rmc` command line above, relevant ids and paths from `rmc find`, and related hand-off ids. Do not spawn other roles unless this command says to.

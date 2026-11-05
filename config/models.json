@@ -1,14 +1,249 @@
 {
   "agents": {
-    "business-analyst": { "model": "opus", "reason": "Complex requirement analysis and ambiguity detection" },
-    "system-analyst": { "model": "opus", "reason": "System reasoning, data modelling and architecture" },
-    "project-manager": { "model": "sonnet", "reason": "Planning, scheduling and coordination" },
-    "senior-engineer": { "model": "opus", "reason": "Complex engineering decisions and implementation" },
-    "devops-engineer": { "model": "opus", "reason": "Infrastructure, reliability and security analysis" },
-    "architecture": { "model": "opus", "reason": "Initial repository analysis and deep investigations" },
-    "qa": { "model": "sonnet", "reason": "Testing and independent verification" },
-    "documentation": { "model": "sonnet", "reason": "Structured documentation upkeep" },
-    "quick-qa": { "model": "haiku", "reason": "Lightweight retrieval and lookups" }
+    "business-analyst": {
+      "model": "opus",
+      "reason": "Complex requirement analysis and ambiguity detection"
+    },
+    "system-analyst": {
+      "model": "opus",
+      "reason": "System reasoning, data modelling and architecture"
+    },
+    "project-manager": {
+      "model": "sonnet",
+      "reason": "Planning, scheduling and coordination"
+    },
+    "senior-engineer": {
+      "model": "opus",
+      "reason": "Complex engineering decisions and implementation"
+    },
+    "devops-engineer": {
+      "model": "opus",
+      "reason": "Infrastructure, reliability and security analysis"
+    },
+    "architecture": {
+      "model": "opus",
+      "reason": "Initial repository analysis and deep investigations"
+    },
+    "qa": {
+      "model": "sonnet",
+      "reason": "Testing and independent verification"
+    },
+    "documentation": {
+      "model": "sonnet",
+      "reason": "Structured documentation upkeep"
+    },
+    "quick-qa": {
+      "model": "haiku",
+      "reason": "Lightweight retrieval and lookups"
+    }
   },
-  "fallback": ["configured model", "main session model (the orchestrator passes its own model alias)"]
+  "fallback": [
+    "configured model",
+    "routing.fallbackTier",
+    "main session model (the orchestrator passes its own model alias)"
+  ],
+  "routing": {
+    "enabled": true,
+    "defaultTier": "medium",
+    "fallbackTier": "medium",
+    "allowEscalation": true,
+    "maxEscalations": 1
+  },
+  "tiers": {
+    "low": "haiku",
+    "medium": "sonnet",
+    "high": "opus"
+  },
+  "supportedModels": [
+    "opus",
+    "sonnet",
+    "haiku",
+    "inherit"
+  ],
+  "tasks": {
+    "search": {
+      "tier": "low",
+      "agent": "quick-qa",
+      "label": "Codebase search and retrieval"
+    },
+    "explain": {
+      "tier": "low",
+      "agent": "quick-qa",
+      "label": "Simple explanation"
+    },
+    "metadata": {
+      "tier": "low",
+      "agent": "quick-qa",
+      "label": "Simple metadata inspection"
+    },
+    "classify": {
+      "tier": "low",
+      "agent": "quick-qa",
+      "label": "Simple classification"
+    },
+    "doc-update": {
+      "tier": "low",
+      "agent": "documentation",
+      "label": "Basic documentation update"
+    },
+    "brd": {
+      "tier": "medium",
+      "agent": "business-analyst",
+      "label": "Structured business requirement analysis"
+    },
+    "fsd": {
+      "tier": "medium",
+      "agent": "business-analyst",
+      "label": "Structured functional specification"
+    },
+    "sipoc": {
+      "tier": "medium",
+      "agent": "business-analyst",
+      "label": "Structured process documentation"
+    },
+    "business-analysis": {
+      "tier": "medium",
+      "agent": "business-analyst",
+      "label": "Standard business analysis"
+    },
+    "srs": {
+      "tier": "medium",
+      "agent": "system-analyst",
+      "label": "Structured system requirements"
+    },
+    "erd": {
+      "tier": "medium",
+      "agent": "system-analyst",
+      "label": "Data model documentation"
+    },
+    "uml": {
+      "tier": "medium",
+      "agent": "system-analyst",
+      "label": "UML modelling"
+    },
+    "system-analysis": {
+      "tier": "medium",
+      "agent": "system-analyst",
+      "label": "Standard system analysis"
+    },
+    "plan": {
+      "tier": "medium",
+      "agent": "project-manager",
+      "label": "Project planning"
+    },
+    "gantt": {
+      "tier": "medium",
+      "agent": "project-manager",
+      "label": "Gantt generation from plan data"
+    },
+    "wbs": {
+      "tier": "medium",
+      "agent": "project-manager",
+      "label": "Work breakdown"
+    },
+    "roadmap": {
+      "tier": "medium",
+      "agent": "project-manager",
+      "label": "Roadmap planning"
+    },
+    "health": {
+      "tier": "medium",
+      "agent": "project-manager",
+      "label": "Evidence-based progress and health"
+    },
+    "code-review": {
+      "tier": "medium",
+      "agent": "senior-engineer",
+      "label": "Standard code review"
+    },
+    "bug-fix": {
+      "tier": "medium",
+      "agent": "senior-engineer",
+      "label": "Simple bug fix"
+    },
+    "small-change": {
+      "tier": "medium",
+      "agent": "senior-engineer",
+      "label": "Small code modification"
+    },
+    "small-feature": {
+      "tier": "medium",
+      "agent": "senior-engineer",
+      "label": "Small feature implementation"
+    },
+    "ci-cd": {
+      "tier": "medium",
+      "agent": "devops-engineer",
+      "label": "Standard Docker and CI/CD configuration"
+    },
+    "qa": {
+      "tier": "medium",
+      "agent": "qa",
+      "label": "Verification against acceptance criteria"
+    },
+    "impact": {
+      "tier": "medium",
+      "agent": "architecture",
+      "label": "Change impact analysis"
+    },
+    "repo-analysis": {
+      "tier": "medium",
+      "agent": "architecture",
+      "label": "Repository analysis"
+    },
+    "complex-feature": {
+      "tier": "high",
+      "agent": "senior-engineer",
+      "label": "Complex feature implementation"
+    },
+    "refactor": {
+      "tier": "high",
+      "agent": "senior-engineer",
+      "label": "Large refactoring"
+    },
+    "debugging": {
+      "tier": "high",
+      "agent": "senior-engineer",
+      "label": "Difficult debugging"
+    },
+    "migration": {
+      "tier": "high",
+      "agent": "senior-engineer",
+      "label": "Complex database migration"
+    },
+    "security": {
+      "tier": "high",
+      "agent": "senior-engineer",
+      "label": "Security-sensitive change"
+    },
+    "architecture": {
+      "tier": "high",
+      "agent": "architecture",
+      "label": "Architecture design or deep analysis"
+    },
+    "infra-design": {
+      "tier": "high",
+      "agent": "devops-engineer",
+      "label": "Complex infrastructure architecture"
+    },
+    "adr": {
+      "tier": "medium",
+      "agent": "senior-engineer",
+      "label": "Architecture decision record"
+    },
+    "rtm": {
+      "tier": "medium",
+      "agent": "business-analyst",
+      "label": "Traceability analysis"
+    },
+    "document": {
+      "tier": "medium",
+      "agent": null,
+      "label": "Structured documentation (give --agent: the template owner)"
+    },
+    "other": {
+      "agent": null,
+      "label": "Unclassified task (uses routing.defaultTier)"
+    }
+  }
 }

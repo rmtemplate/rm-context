@@ -1,17 +1,18 @@
 {
   "name": "rm-context",
   "version": "0.3.0",
-  "description": "Your Project Intelligence, Connected. A coordinated engineering team (Business Analyst, System Analyst, Project Manager, Senior Engineer, DevOps) on top of an evidence-backed project knowledge graph, professional documentation engine, Gantt planning and an offline project viewer.",
+  "description": "Your Project Intelligence Layer for AI Coding Agents. Claude Code integration for RM Context: BA, SA, PM, Senior Engineer and DevOps agents with adaptive model routing, on an evidence-backed project knowledge graph, documentation engine, Gantt planning and an offline viewer.",
   "author": {
     "name": "RM Template",
-    "url": "https://github.com/rmtemplate"
+    "url": "https://rmtemplate.com"
   },
-  "homepage": "https://github.com/rmtemplate/rm-context",
+  "homepage": "https://rmtemplate.com",
   "repository": "https://github.com/rmtemplate/rm-context",
   "license": "MIT",
   "icon": ".claude-plugin/icon.png",
   "keywords": [
     "project-intelligence",
+    "ai-coding-agents",
     "knowledge-graph",
     "business-analysis",
     "system-analysis",
@@ -19,6 +20,7 @@
     "devops",
     "documentation",
     "gantt",
-    "traceability"
+    "traceability",
+    "model-routing"
   ]
 }

@@ -18,7 +18,11 @@ Core
   rtm [--out file.md]              Requirement Traceability Matrix from the graph
   link <path>                      Register another RM Context project as a reference
   viewer [--open] [--view graph]   Build .rmcontext/viewer/index.html (graph.html opens the graph view)
-  routing [--json] [--agent name]  Resolved agent → model routing
+  routing [--json] [--agent name]  Agent default models, tiers and overrides
+  route --category <c> [--agent a] [--signals s,s] [--model m] [--workflow w] [--handoff H-id] [--json] [--no-record]
+                                   Adaptive model choice for one delegation (see: route categories)
+  route --escalate <R-id> --reason "…" [--handoff H-id]   Next tier for the same agent, reusing its hand-off
+  route categories | stats [--json]
   handoff add <file.json> | list [--to agent]
 
 Documents
@@ -147,7 +151,20 @@ async function main(argv) {
         const row = r.rows.find((x) => x.agent === args.agent) || fail(`Unknown agent ${args.agent}. Agents: ${r.rows.map((x) => x.agent).join(', ')}`);
         return out(`${row.agent}: model=${row.model} (${row.source})${row.model === 'inherit' ? ' → pass your own model alias' : ''}; fallback: retry with your own model alias`);
       }
-      return out(args.json ? r : formatRouting(r));
+      if (args.json) return out(r);
+      const { loadModelConfig } = await import('./lib/routing.mjs');
+      const m = loadModelConfig(c);
+      return out(formatRouting(r) + `\n\nAdaptive routing: ${m.routing.enabled ? 'on' : 'off'} · tiers low=${m.tiers.low} medium=${m.tiers.medium} high=${m.tiers.high} · fallback tier ${m.routing.fallbackTier} · escalation ${m.routing.allowEscalation ? `max ${m.routing.maxEscalations}` : 'off'}\nThe agent defaults above apply when a delegation has no task category; with a category, use: rmc route --category <c>`);
+    }
+    case 'route': {
+      const R = await import('./lib/routing.mjs');
+      if (sub === 'categories') return out(R.formatCategories(c));
+      if (sub === 'stats') { const st = R.routeStats(c); return out(args.json ? st : R.formatStats(st)); }
+      if (sub) fail(`Unknown: rmc route ${sub}. Use: rmc route --category <c> | categories | stats`);
+      const r = R.route(c, { agent: args.agent, category: args.category, signals: args.signals, model: args.model,
+        workflow: args.workflow, handoff: args.handoff, contextReuse: Boolean(args['context-reuse']),
+        escalate: args.escalate, reason: typeof args.reason === 'string' ? args.reason : undefined, record: !args['no-record'] });
+      return out(args.json ? r : R.formatRoute(r));
     }
     case 'handoff': {
       requireInit(c);

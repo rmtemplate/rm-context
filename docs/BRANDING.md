@@ -1,7 +1,8 @@
 # RM Context — Brand Guidelines
 
 **Product:** RM Context · **Organization:** RM Template · **Plugin id:** `rm-context`
-**Tagline:** *Your Project Intelligence, Connected.*
+**Tagline:** *Your Project Intelligence Layer for AI Coding Agents.*  
+**Website:** [rmtemplate.com](https://rmtemplate.com)
 
 ## The mark
 

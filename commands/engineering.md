@@ -12,8 +12,7 @@ Run the **Senior Engineer** workflow for: $ARGUMENTS
 Project status:
 !`node "${CLAUDE_PLUGIN_ROOT}/scripts/rmc.mjs" status 2>&1 | head -12`
 
-Model routing:
-!`node "${CLAUDE_PLUGIN_ROOT}/scripts/rmc.mjs" routing --agent senior-engineer`
+Model routing: right before delegating, run `rmc route --agent senior-engineer --category <bug-fix, small-change, small-feature, complex-feature, refactor, debugging, migration, security, code-review or adr> [--signals …]`. Add signals only when they apply (see *Model routing* in the `team-workflows` skill). Pass its `model` to the Agent tool and show the user its routing block.
 
 1. If the status above says RM Context is not initialized, run `rmc init` first and show its summary.
 2. If no request was given, ask the user what they want the Senior Engineer to work on (one question, with 3–4 concrete options drawn from the status), then stop.
@@ -26,4 +25,4 @@ Model routing:
    Ask blocking questions directly. Never mark documents Approved unless the user explicitly approves.
 5. Run `rmc viewer` so the snapshot reflects the new knowledge.
 
-Delegation rules: follow the `team-workflows` skill. Pass the routed `model` when you delegate. If it fails because the model is unavailable, retry once with your own model alias. In the delegation prompt, include the user's request verbatim, the exact `rmc` command line above, relevant ids and paths from `rmc find`, and related hand-off ids. Do not spawn other roles unless this command says to.
+Delegation rules: follow the `team-workflows` skill. Pass the `model` from `rmc route` when you delegate. If it fails because the model is unavailable, retry once with your own model alias. If the agent shows the task is harder than classified, escalate once with `rmc route --escalate <R-id> --reason "<new evidence>" --handoff <H-id>` instead of restarting the work. In the delegation prompt, include the user's request verbatim, the exact `rmc` command line above, relevant ids and paths from `rmc find`, and related hand-off ids. Do not spawn other roles unless this command says to.
