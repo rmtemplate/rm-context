@@ -8,7 +8,7 @@
 
 [![Website](https://img.shields.io/badge/web-rmtemplate.com-5B4CF0)](https://rmtemplate.com)
 [![Version](https://img.shields.io/badge/version-0.3.0-16161D)](CHANGELOG.md)
-[![Node.js](https://img.shields.io/badge/node-%E2%89%A518.17-16161D)](#quick-start)
+[![Node.js](https://img.shields.io/badge/node-%E2%89%A518.17-16161D)](#standalone-cli)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-supported-16161D)](docs/integrations/CLAUDE_CODE.md)
 [![License](https://img.shields.io/badge/license-MIT-16161D)](LICENSE)
 
@@ -48,9 +48,9 @@ The core is a dependency-free Node.js CLI that works with any editor or agent. P
 |---|---|---|
 | Any terminal (core CLI) | **Supported** | [CLI usage](#cli-usage) |
 | Claude Code | **Supported** | [docs/integrations/CLAUDE_CODE.md](docs/integrations/CLAUDE_CODE.md) |
-| OpenAI Codex | **Planned** | [docs/integrations/CODEX.md](docs/integrations/CODEX.md) |
-| OpenCode | **Planned** | [docs/integrations/OPENCODE.md](docs/integrations/OPENCODE.md) |
-| Cursor | **Planned** | [docs/integrations/CURSOR.md](docs/integrations/CURSOR.md) |
+| OpenAI Codex | **Planned** adapter · experimental manual setup | [docs/integrations/CODEX.md](docs/integrations/CODEX.md) |
+| OpenCode | **Planned** adapter · experimental manual setup | [docs/integrations/OPENCODE.md](docs/integrations/OPENCODE.md) |
+| Cursor | **Planned** adapter · experimental manual setup | [docs/integrations/CURSOR.md](docs/integrations/CURSOR.md) |
 
 The full breakdown is in the [compatibility matrix](#compatibility-matrix).
 
@@ -179,49 +179,260 @@ rmc pm health     # red / amber / green from explicit rules
 
 The plan schema is in [skills/project-management/SKILL.md](skills/project-management/SKILL.md).
 
-## Quick start
+## Installation
 
-**Requirements:** Node.js 18.17 or newer. git is optional; it gives exact `.gitignore` handling and commit evidence.
+RM Context provides a standalone CLI and platform-specific integration instructions. Choose your preferred development environment below.
 
-```bash
-git clone https://github.com/rmtemplate/rm-context.git ~/rm-context
-alias rmc='node ~/rm-context/scripts/rmc.mjs'   # PowerShell: function rmc { node $HOME\rm-context\scripts\rmc.mjs @args }
+<details open>
+<summary><strong>Claude Code</strong> — Supported</summary>
 
-cd /path/to/your-project
-rmc init                    # scan the repository into .rmcontext/
-rmc find users              # search graph nodes, documents and notes
-rmc impact src/routes/users.js
-rmc viewer --open           # open the offline viewer
-```
+<br>
 
-Using Claude Code? See [Platform-specific installation](#platform-specific-installation).
+**Prerequisites**
+- Claude Code with plugin support.
+- Node.js 18.17 or newer.
 
-## Platform-specific installation
-
-**Claude Code (supported)**
+**Install from the marketplace.** Run these inside Claude Code:
 
 ```text
 /plugin marketplace add rmtemplate/rm-context
 /plugin install rm-context@rm-context-marketplace
 ```
 
-Then, in your project, run `/rm-context:init`. Details are in [docs/integrations/CLAUDE_CODE.md](docs/integrations/CLAUDE_CODE.md).
+Or run them from a terminal:
 
-| Claude Code command | Purpose |
-|---|---|
-| `/rm-context:init` · `/rm-context:refresh` · `/rm-context:status` | Set up, update and inspect `.rmcontext/` |
-| `/rm-context:find` · `/rm-context:impact` | Search and change impact |
-| `/rm-context:graph` · `/rm-context:viewer` | Open the viewer |
-| `/rm-context:link` | Register a related repository |
-| `/rm-context:routing` | Show agent defaults, tiers and categories |
-| `/rm-context:discover` · `/rm-context:feature` · `/rm-context:assess` | Workflows: new project, feature end to end, assessment of an existing project |
-| `/rm-context:ba` · `/rm-context:sa` · `/rm-context:pm` · `/rm-context:engineering` · `/rm-context:devops` | Work with one role |
-| `/rm-context:document` · `/rm-context:fsd` · `/rm-context:sipoc` · `/rm-context:srs` · `/rm-context:erd` · `/rm-context:adr` · `/rm-context:roadmap` · `/rm-context:rtm` · `/rm-context:gantt` | Documents and plans |
-| `/rm-context:review` · `/rm-context:architecture` · `/rm-context:project-health` | Code review, architecture analysis, health report |
+```bash
+claude plugin marketplace add rmtemplate/rm-context
+claude plugin install rm-context@rm-context-marketplace
+```
 
-To approve a document, say so in chat, e.g. *"Approve FSD-001, approved by Jane Doe"*. Agents never approve on their own.
+Restart Claude Code when prompted. To update later, run `/plugin marketplace update rm-context-marketplace`.
 
-**Codex, OpenCode and Cursor (planned).** There is no adapter yet. You can use the [core CLI](#cli-usage) in a terminal alongside them. See [docs/integrations/](docs/integrations/).
+**Local development install.** Load the plugin from a local clone without installing it:
+
+```bash
+git clone https://github.com/rmtemplate/rm-context.git ~/rm-context
+cd /path/to/your-project
+claude --plugin-dir ~/rm-context
+```
+
+**Verify the install.**
+- Run `claude plugin list`. It should show `rm-context@rm-context-marketplace` with status *enabled*.
+- Or run `/rm-context:status` inside a project. It reports the project status, or says the project is not initialized yet.
+
+**First commands**
+
+```text
+/rm-context:init                     scan the project into .rmcontext/
+/rm-context:viewer                   open the offline viewer
+/rm-context:assess                   team assessment of an existing project
+/rm-context:feature <description>    feature from requirements to verified code
+/rm-context:fsd <title>              Functional Specification (Business Analyst)
+```
+
+**Limitations**
+- Adaptive routing sets the model of delegated agents only; your main session model never changes.
+- PDF export needs Chrome, Chromium or Edge. DOCX export needs pandoc.
+
+See [docs/integrations/CLAUDE_CODE.md](docs/integrations/CLAUDE_CODE.md).
+
+</details>
+
+<details>
+<summary><strong>OpenAI Codex</strong> — Experimental / Not Yet Verified</summary>
+
+<br>
+
+There is no native RM Context adapter for Codex. This is a manual workflow: you run the [standalone CLI](#standalone-cli) yourself, and Codex reads `.rmcontext/` through its project instructions. It has not been tested in Codex.
+
+**Prerequisites**
+- [Codex CLI](https://github.com/openai/codex): `npm install -g @openai/codex`
+- Node.js 18.17 or newer.
+- A clone of RM Context, as in [Standalone CLI](#standalone-cli).
+
+**1. Build the project knowledge.**
+
+```bash
+cd /path/to/your-project
+node ~/rm-context/scripts/rmc.mjs init
+```
+
+**2. Point Codex at it.** Codex reads `AGENTS.md` from the project root (and nested folders) at the start of a session. Add the [project instructions snippet](#project-instructions-for-other-ai-agents) to your project's `AGENTS.md`.
+
+**3. Work as usual.**
+- Ask Codex to search with `rmc find`, check `rmc impact` before edits, and run `rmc refresh` after edits.
+- Documents are in `.rmcontext/documents/`, and the plan is in `.rmcontext/project-management/`.
+- Whether Codex may run the CLI depends on your sandbox and approval settings.
+
+**Optional and untested: role playbooks as skills.** Codex loads skills from `.agents/skills/<name>/SKILL.md`. You can copy folders from `~/rm-context/skills/` there. They were written for Claude Code and may reference Claude-specific behaviour.
+
+**Still needs a native adapter**
+- the RM Context agents
+- automatic agent switching
+- adaptive model routing
+- slash commands and hooks
+
+Codex supports custom agents (TOML files in `.codex/agents/` with an optional `model`), but RM Context does not ship them yet. See [docs/integrations/CODEX.md](docs/integrations/CODEX.md).
+
+</details>
+
+<details>
+<summary><strong>OpenCode</strong> — Experimental / Not Yet Verified</summary>
+
+<br>
+
+There is no native RM Context adapter for OpenCode. This is a manual workflow using the [standalone CLI](#standalone-cli). It has not been tested in OpenCode.
+
+**Prerequisites**
+- [OpenCode](https://opencode.ai/docs/): `curl -fsSL https://opencode.ai/install | bash`, or `npm install -g opencode-ai`
+- Node.js 18.17 or newer.
+- A clone of RM Context, as in [Standalone CLI](#standalone-cli).
+
+**1. Build the project knowledge.**
+
+```bash
+cd /path/to/your-project
+node ~/rm-context/scripts/rmc.mjs init
+```
+
+**2. Point OpenCode at it.** OpenCode reads `AGENTS.md` from the project root. Add the [project instructions snippet](#project-instructions-for-other-ai-agents) to it. To also load the generated index on every session, list it in `opencode.json`:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "instructions": [".rmcontext/INDEX.md"]
+}
+```
+
+**3. Optional and untested: an RM Context command.** Create `.opencode/commands/rmc-find.md`, then run `/rmc-find <terms>`:
+
+```markdown
+---
+description: Search RM Context project knowledge
+---
+
+Run `node ~/rm-context/scripts/rmc.mjs find $ARGUMENTS`, read the cited files, and answer with path:line evidence.
+```
+
+**4. Optional and untested: an experimental agent.** Create `.opencode/agents/rm-analyst.md`:
+
+```markdown
+---
+description: Answers questions about this project using RM Context knowledge in .rmcontext/
+mode: subagent
+---
+
+Use .rmcontext/INDEX.md and `node ~/rm-context/scripts/rmc.mjs find|impact` before reading source. Cite path:line. Never edit .rmcontext/graph or documents/registry.json by hand.
+```
+
+You can add `model: provider/model-id` to pin a model. Permission fields differ between OpenCode versions, so check the [agents docs](https://opencode.ai/docs/agents/).
+
+**Still needs a native adapter**
+- the RM Context role agents
+- automatic agent switching
+- adaptive model routing per delegation
+
+See [docs/integrations/OPENCODE.md](docs/integrations/OPENCODE.md).
+
+</details>
+
+<details>
+<summary><strong>Cursor</strong> — Experimental / Not Yet Verified</summary>
+
+<br>
+
+There is no native RM Context adapter for Cursor. This is a manual workflow using the [standalone CLI](#standalone-cli). It has not been tested in Cursor.
+
+**Prerequisites**
+- [Cursor](https://cursor.com/docs).
+- Node.js 18.17 or newer.
+- A clone of RM Context, as in [Standalone CLI](#standalone-cli).
+
+**1. Build the project knowledge.**
+
+```bash
+cd /path/to/your-project
+node ~/rm-context/scripts/rmc.mjs init
+```
+
+**2. Point Cursor at it.** Cursor reads `AGENTS.md` from the project root, and project rules from `.cursor/rules/*.mdc`. Either add the [project instructions snippet](#project-instructions-for-other-ai-agents) to `AGENTS.md`, or create `.cursor/rules/rm-context.mdc` with this frontmatter followed by the snippet:
+
+```markdown
+---
+description: RM Context project knowledge in .rmcontext/ and how to query it
+alwaysApply: true
+---
+```
+
+The rule must use the `.mdc` extension. A plain `.md` file in `.cursor/rules/` is ignored.
+
+**3. Optional and untested: a command.** Cursor lists Markdown files in `.cursor/commands/` as `/` commands. This feature is in beta. For example, `.cursor/commands/rmc-impact.md` could contain:
+
+```markdown
+Run `node ~/rm-context/scripts/rmc.mjs impact <the file or id I give>` and summarise the affected APIs, tables, tests, tasks and documents.
+```
+
+**Note on agents.** Cursor's documentation lists `.claude/agents/` as a compatible subagent location. RM Context's agents have **not** been verified in Cursor: their `model` values are Claude aliases, and they rely on Claude Code skill preloading.
+
+**Still needs a native adapter**
+- the RM Context role agents
+- automatic agent switching
+- adaptive model routing
+- hooks
+
+See [docs/integrations/CURSOR.md](docs/integrations/CURSOR.md).
+
+</details>
+
+> **Compatibility notice.** RM Context Core and its standalone CLI are designed to be platform-independent. Native agent orchestration, automatic agent switching, and adaptive model routing depend on platform-specific integrations. Experimental setup instructions are provided for exploration and have not yet been validated.
+
+### Standalone CLI
+
+Use RM Context without any AI coding agent.
+
+**Prerequisites**
+- Node.js 18.17 or newer. There are no other dependencies and nothing to `npm install`.
+- git is optional; it gives exact `.gitignore` handling and commit evidence.
+
+```bash
+git clone https://github.com/rmtemplate/rm-context.git ~/rm-context
+alias rmc='node ~/rm-context/scripts/rmc.mjs'   # PowerShell: function rmc { node $HOME\rm-context\scripts\rmc.mjs @args }
+```
+
+Run commands from your project folder, or pass `--root <dir>`.
+
+```bash
+rmc init                                          # create .rmcontext/ and run the first full scan
+rmc refresh                                       # rescan changed files only (--full rescans everything)
+rmc status                                        # freshness, coverage, documents, plan
+rmc find users                                    # search graph nodes, documents and notes
+rmc doc new fsd --title "User registration" --author user
+rmc doc validate FSD-001
+rmc pm init                                       # create project-management/plan.json, then add tasks
+rmc pm gantt                                      # gantt.svg + interactive gantt.html
+rmc pm health                                     # health report from plan and repository evidence
+rmc viewer --open                                 # build and open the offline viewer
+```
+
+The full reference is in [CLI usage](#cli-usage), or run `rmc help`.
+
+#### Project instructions for other AI agents
+
+Add this to `AGENTS.md`, or to a rule file, so an agent uses the generated knowledge. Replace `~/rm-context` with your clone's path if it differs.
+
+```markdown
+## RM Context
+This project keeps derived project knowledge in `.rmcontext/` (RM Context).
+- Start with `.rmcontext/INDEX.md` and `.rmcontext/context/`.
+- Search: `node ~/rm-context/scripts/rmc.mjs find <terms>`
+- Before changing code: `node ~/rm-context/scripts/rmc.mjs impact <file or id>`
+- After changing code: `node ~/rm-context/scripts/rmc.mjs refresh`
+- Documents are in `.rmcontext/documents/`; the plan is in `.rmcontext/project-management/plan.json`.
+- Create documents with `rmc doc new <type> --title "…" --author user` and check them with `rmc doc validate <id>`.
+- Never mark a document Approved unless the user explicitly approves it.
+- Do not hand-edit `.rmcontext/graph/`, `documents/registry.json` or `state/`; use the CLI.
+- Never open `.env` files, private keys or database dumps.
+```
 
 ## CLI usage
 
@@ -241,6 +452,22 @@ Run `rmc help` for the full reference. All commands run in the current directory
 | `rmc pm init \| validate \| progress \| gantt \| mermaid \| health` | Plan, Gantt and health |
 | `rmc routing` · `rmc route …` | Agent defaults; adaptive model choice, escalation, stats |
 | `rmc handoff add <file.json> \| list [--to agent]` | Structured hand-offs between roles |
+
+## Claude Code commands
+
+| Command | Purpose |
+|---|---|
+| `/rm-context:init` · `/rm-context:refresh` · `/rm-context:status` | Set up, update and inspect `.rmcontext/` |
+| `/rm-context:find` · `/rm-context:impact` | Search and change impact |
+| `/rm-context:graph` · `/rm-context:viewer` | Open the viewer |
+| `/rm-context:link` | Register a related repository |
+| `/rm-context:routing` | Show agent defaults, tiers and categories |
+| `/rm-context:discover` · `/rm-context:feature` · `/rm-context:assess` | Workflows: new project, feature end to end, assessment of an existing project |
+| `/rm-context:ba` · `/rm-context:sa` · `/rm-context:pm` · `/rm-context:engineering` · `/rm-context:devops` | Work with one role |
+| `/rm-context:document` · `/rm-context:fsd` · `/rm-context:sipoc` · `/rm-context:srs` · `/rm-context:erd` · `/rm-context:adr` · `/rm-context:roadmap` · `/rm-context:rtm` · `/rm-context:gantt` | Documents and plans |
+| `/rm-context:review` · `/rm-context:architecture` · `/rm-context:project-health` | Code review, architecture analysis, health report |
+
+To approve a document, say so in chat, e.g. *"Approve FSD-001, approved by Jane Doe"*. Agents never approve on their own.
 
 ## Configuration
 

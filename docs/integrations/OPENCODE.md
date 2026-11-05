@@ -4,6 +4,8 @@
 
 ## What works today
 
+For step-by-step experimental setup instructions (not yet verified), open the **OpenCode** section under [README › Installation](../../README.md#installation).
+
 The core CLI is plain Node.js, so you can run it yourself in a terminal. See [CLI usage](../../README.md#cli-usage). OpenCode can then read the generated `.rmcontext/` files. This has not been tested inside OpenCode.
 
 ## Planned adapter design

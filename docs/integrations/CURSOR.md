@@ -4,6 +4,8 @@
 
 ## What works today
 
+For step-by-step experimental setup instructions (not yet verified), open the **Cursor** section under [README › Installation](../../README.md#installation).
+
 The core CLI is plain Node.js, so you can run it yourself in a terminal. See [CLI usage](../../README.md#cli-usage). Cursor can then read the generated `.rmcontext/` files. This has not been tested inside Cursor.
 
 Cursor's documentation lists `.claude/agents/` as a compatible location for subagents. RM Context's agent files were **not** written or tested for Cursor:
