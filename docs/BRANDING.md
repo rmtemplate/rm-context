@@ -51,4 +51,4 @@ The wordmark is set in **Inter** (fallbacks: Segoe UI, Helvetica Neue, Arial): *
 
 ## Don'ts
 
-Don't recolour the edges and nodes differently from each other. Don't add nodes along the edges. Don't rotate, outline or stretch the mark. Don't place `logo-light.svg` on dark backgrounds. Don't reintroduce the retired retro raster logos (`assets/rm-context-logo.png`, `assets/rm-context-banner.png`).
+Don't recolour the edges and nodes differently from each other. Don't add nodes along the edges. Don't rotate, outline or stretch the mark. Don't place `logo-light.svg` on dark backgrounds. Don't reintroduce the retired retro raster logos.
