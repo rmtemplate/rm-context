@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.0 — 2026-11-06
 
 ### Added
 - **Smart project viewer.** A new single-file offline viewer.
