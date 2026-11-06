@@ -30,6 +30,21 @@
   - `rmc route stats` adds a Routing efficiency block.
   - Direct vs delegated savings are labelled Controlled, Observational estimate or Unavailable.
   - The delegation event's `tokens` field is unchanged, for compatibility. It is Claude Code's last-call context size, so analytics do not use it.
+- **`/rmc:run <task>`: sequential workflows** (`scripts/lib/workflow.mjs`, `commands/run.md`, `rmc workflow …`).
+  - **Planner.** Picks the smallest sufficient workflow: main session only, one specialist, analysis → implementation → verification, or security analysis → change → QA. Models come from the existing route precedence.
+  - **State machine.** `plan` / `start` / `done` / `finish` / `cancel`.
+    - A stage passes only with its agent's recorded run and a structured hand-off; verification also needs all acceptance criteria.
+    - A failed verification returns to implementation (`maxQaLoops`); other failures are retried (`maxAttempts`) with at most one escalation.
+    - A failed, missing or cancelled stage blocks completion.
+  - **Knowledge packages per stage.** Role-specific retrieval, acceptance criteria, the previous hand-off, `[inferred]` / `[stale]` labels, delivered to the agent by a new **SubagentStart** hook. `retrieve()` gains `sections` and `changed` options.
+  - **Hooks.**
+    - PreToolUse allows only the started stage's agent and model during a workflow.
+    - PreToolUse denies agents started inside RM Context agents (`agent_id` + `agent_type`).
+    - A new **SubagentStop** hook records completion and full usage from `agent_transcript_path` and releases the one-agent lock. A background launch no longer releases it at PostToolUse or Stop, and PostToolUse and SubagentStop never log the same run twice.
+    - Stop reports an unfinished workflow as unfinished.
+  - **Telemetry.** `workflow` and `workflow-stage` events: requested and actual model, mode, attempt, escalations, package tokens, knowledge hits and stale references, hand-off tokens, failure reason. Turn usage is tagged with workflow ids. `rmc workflow status` shows per-stage tokens and cost.
+  - **Write-back.** On finish: incremental re-scan of changed files, plus a summary hand-off linking the stage hand-offs.
+  - New task category `verification` (Quick QA, low tier). Suggest-first for ordinary prompts is unchanged.
 - **Routing benchmark & efficiency intelligence** (`scripts/lib/benchmark.mjs`, `config/benchmark.json`).
   - Routes record `origin` (`command`, `workflow`, `suggested`, `manual`; older records show `unknown`) and the user-requested model. Slash commands pass `--origin command`.
   - `rmc route stats` adds a routing distribution: routes by origin, agent, tier and model; suggestions, routes, delegations and direct responses counted separately, once per id; requested vs actual subagent model, with `unverified` when the transcript could not be read; delegation status and foreground/background.
@@ -39,6 +54,15 @@
   - `rmc route benchmark [report]` and `rmc route efficiency`: pair validity with reasons, profiles per category / complexity / main model / subagent model, VERIFIED (≥ 3 valid pairs) / INSUFFICIENT DATA / NOT COMPARABLE. Token and cost savings are reported separately.
   - `rmc route` prints an advisory efficiency line once benchmarks exist; the routed model never changes.
   - **Changed:** `rmc route baseline` now records a *declared* pair, shown but never verified; older `baselines.jsonl` entries are read the same way. The observational estimate stays in `rmc route report` and is never used for recommendations. The savings line moved from `rmc route stats` to `rmc route report` / `rmc route benchmark report`.
+
+### Fixed (`/rmc:run` planner and verification gate, smoke test W-mw5509w45u2)
+- A task that asked to analyse, implement a documentation fix and verify it was planned as a single Documentation stage, with no verification, although it had 3 acceptance criteria. The cause: the first matching keyword ("dokumentasi") decided the category, and `stagesFor('doc-update')` ignored code and criteria.
+  - The planner now reads the task's intents (analysis, change, verification, code reference): analysis + change + verification → System Analyst → Senior Engineer → Quick QA.
+  - Documentation stays one stage unless it touches code or asks for verification.
+  - Acceptance criteria always add a verification stage.
+- Engine invariant: `rmc workflow finish` refuses a workflow with criteria, an implementation stage or a planned verification stage until a verification stage has passed and every criterion is verified.
+  - Criteria are verified only by the QA hand-off's per-criterion `{id, status, evidence}` results. A `pass` verdict, a successful agent run or a `--criteria` count alone no longer pass verification.
+  - Per-criterion results and evidence are kept in the workflow (`checks`) and the QA hand-off, and shown by `rmc workflow status` / `finish`.
 
 ### Fixed (routing and retrieval)
 - Long prompts got no retrieved context: relevance was diluted by every known word in the prompt. It is now normalised over the six most discriminative terms, and repeated words weigh more (1 + ln tf). `minimumRelevance` is unchanged, and short prompts score as before. Fixtures: `tests/fixtures/prompts/retrieval.json`.

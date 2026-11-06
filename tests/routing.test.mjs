@@ -135,7 +135,7 @@ test('every delegating command routes through rmc route', () => {
   for (const f of fs.readdirSync(path.join(ROOT, 'commands'))) {
     const s = fs.readFileSync(path.join(ROOT, 'commands', f), 'utf8');
     assert.doesNotMatch(s, /rmc\.mjs" routing --agent/, `${f} still uses static routing`);
-    if (/Delegate to the `/.test(s) || /Delegation rules/.test(s)) assert.match(s, /rmc route/, `${f} delegates without rmc route`);
+    if (/Delegate to the `/.test(s) || /Delegation rules/.test(s)) assert.match(s, /rmc route|rmc workflow start/, `${f} delegates without rmc route`); // workflow start records each stage's route
     for (const m of s.matchAll(/--category ([a-z-]+)/g)) assert.ok(JSON.parse(fs.readFileSync(path.join(ROOT, 'config/models.json'), 'utf8')).tasks[m[1]], `${f}: unknown category ${m[1]}`);
   }
 });

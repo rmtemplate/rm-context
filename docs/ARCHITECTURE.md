@@ -213,6 +213,36 @@ Every route reports `mainSessionModelChanged: false`. Subagent models never chan
 - **Distribution, `distribution(routes, events)`.** Routes come from `routing.jsonl`, deduped by route id, by `origin` / agent / tier / resolved model / user-requested model. Suggestions, delegations and prompts come from telemetry. The actual model is the subagent transcript's model or `unverified`.
   - `savings(direct, delegated)` → `{ usd, pct, interpretation }`, where interpretation is `delegated cheaper`, `delegated more expensive`, `equal` or `unknown`.
 
+### Workflows (`/rmc:run`)
+
+`workflow.mjs` is a deterministic state machine. **Hooks cannot invoke the Agent tool**; the main session executes every stage, and the module plans, checks and records it. State lives in `.rmcontext/state/workflows/<W-id>.json`. The task text is never stored, only its sha256.
+
+- **`plan`.**
+  - `classifyPrompt` (or `--category`) produces the category and signals. `intentsOf(task)` adds booleans for analysis, change, verification and a code reference (the task text is not stored). `stagesFor(category, signals, risk, { intents, criteria })` produces the stages:
+    - analysis + change + verification → SA → SE → verify, whatever the category word
+    - `doc-update` is one stage, plus verify when it touches code or asks for verification
+    - acceptance criteria always add a verify stage
+  - `classifyPrompt` itself is unchanged, so suggest-first is unaffected.
+  - `checks` holds one `{ id: 'C1', status: 'unverified' }` per criterion; `verifyRequired` records whether the plan had a verify stage.
+  - Each stage is resolved by `route()` with `record: false`, so routes are recorded only when a stage starts.
+  - Role-specific knowledge comes from `retrieve(c, task, { sections, changed, maxContextTokens: 900 })`.
+  - A running workflow in the same session blocks a new plan; an unstarted plan is superseded.
+- **`start`.** Records the route (or one escalation through `route({ escalate })`), builds `stagePackage()` (goal, criteria, input hand-off, knowledge policy, knowledge) and points the session (`rmc-session-<sid>.json`) at the workflow.
+- **Hooks.**
+  - `guard()` (PreToolUse, before the lock is taken): the started stage's agent, its model, once per attempt.
+  - `preAgent()`: background, concurrent and nested (`agent_id` + rmc `agent_type`).
+  - `subagentStart()`: emits the package as `additionalContext`.
+  - `recordRun()` (PostToolUse, PostToolUseFailure, SubagentStop): merges evidence by `agentId`/`delegationId`.
+- **Lock and dedupe.**
+  - Foreground: SubagentStop runs first and notes the agent as stopped; PostToolUse logs the delegation.
+  - Background: PostToolUse logs `started`, holds the lock and notes the agent as pending; SubagentStop logs `completed` with full usage and releases the lock.
+  - `dedupe()` keeps the last event per `delegationId`. Stop releases only a non-background lock.
+- **Gates (`done`).**
+  - pass: needs a recorded run (agentId, not failed) and a hand-off (`--handoff -` JSON or an existing id). A verify stage with criteria also needs the hand-off's `criteria` array, with every `Cn` at `status: pass` and non-empty `evidence`. Its results are stored on `checks` (status `verified`, evidence, stage, agent, attempt, hand-off). `--criteria p/t` is optional and must agree.
+  - fail on verify: each criterion's result is kept as `last`. Earlier implementation and verify stages are reset to pending, every check goes back to `unverified`, the QA hand-off becomes the input, and `qaLoops++` (bounded by `maxQaLoops`).
+  - fail elsewhere: retry while `tries < maxAttempts`; `--escalate` with a hand-off requests one escalation. Otherwise the workflow fails, and pending stages become `not run`.
+- **`finish`.** Every required stage passed with a run. If the workflow has criteria, an implement stage or `verifyRequired`, a verify stage must have passed, and every check must be `verified`. Otherwise it refuses with the unverified ids. Then `applyPending()` and a summary hand-off. `summary()` adds turn usage tagged with the workflow id and the stage runs' usage, priced by `costOf`.
+
 ### Routing benchmarks
 
 `benchmark.mjs` sits beside the routing engine; nothing in routing depends on it. It reuses the usage collector, pricing (`measure`, `costOf`), telemetry snapshots (`snapshot`) and the CLI.

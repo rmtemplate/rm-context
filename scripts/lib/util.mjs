@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 export const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 export const SCHEMA_VERSION = 2;
-export const GENERATOR = 'rm-context@0.4.3';
+export const GENERATOR = 'rm-context@0.4.4';
 
 export class RmcError extends Error {}
 export const fail = (msg) => { throw new RmcError(msg); };

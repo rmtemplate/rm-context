@@ -96,6 +96,46 @@ The agent is picked from the work being done:
 - **Workflows** route each step to its role: `discover`, `feature`, `assess`.
 - **Task categories** have a default agent: `rmc route --category <c>`.
 
+### One task, end to end: `/rmc:run <task>` (Claude Code)
+
+`/rmc:run` runs a whole task as a sequential workflow, and you get one consolidated answer. You never run the intermediate commands.
+
+1. **Plan.** `rmc workflow plan` classifies the task with the same deterministic rules as suggestions. It picks the smallest sufficient workflow:
+
+   | Task | Stages |
+   |---|---|
+   | Simple explanation, general question | Main session only |
+   | Investigation | System Analyst or Architecture |
+   | Feature, or a task that asks to analyse, change and verify | System Analyst → Senior Engineer → Quick QA |
+   | Bug fix, refactor, migration | Senior Engineer → Quick QA |
+   | Documentation only | Documentation |
+   | Documentation that touches code or asks for verification | Documentation → Quick QA |
+   | Security-sensitive change | Security analysis → Senior Engineer → QA verification |
+   | Review, document, plan | The category's own agent |
+
+   A stated intent wins over a single keyword: "analyse …, fix the documentation …, then verify" is a change workflow, not a documentation one. A plan with acceptance criteria always gets a verification stage. High-risk work is always verified by `qa` instead of Quick QA. Each stage's model comes from the usual precedence: user → project → agent override → adaptive tier → agent default. The main session keeps its own model.
+2. **Run each stage.**
+   - `rmc workflow start` records the stage's route and prints the exact Agent call.
+   - The main session makes that call in the foreground.
+   - The **SubagentStart** hook gives the agent a compact package: the stage goal, the acceptance criteria (as `C1`, `C2`, …), the previous stage's hand-off, and only the knowledge relevant to its role. Each entry is labelled `[inferred]` or `[stale]` where that applies.
+   - The **PreToolUse** hook allows only the started stage's agent and model, one agent at a time, and no agent started from inside an RM Context agent.
+3. **Gate.** `rmc workflow done` passes a stage only when its agent's run is recorded from its transcript and a structured hand-off exists. A verification stage passes only when the QA hand-off proves every criterion: `"criteria": [{"id": "C1", "status": "pass", "evidence": "…"}]`. A `pass` verdict alone, or a criterion without evidence, is refused; a criterion is never marked verified just because the agent ran.
+   - A failed verification returns the work to implementation, with the QA hand-off as input. This happens at most `maxQaLoops` times (default 2).
+   - Any other failed stage is retried `maxAttempts` times (default 2), with at most one escalation through the existing policy.
+4. **Finish.** `rmc workflow finish` refuses unless every required stage passed. A workflow that changes code or has acceptance criteria also needs a passed verification stage and every criterion verified; this is checked by the engine, whatever the plan held. It then:
+   - re-scans the changed files, so stale knowledge is invalidated
+   - links the stage hand-offs in one summary hand-off; assumptions stay assumptions
+   - prints each stage's requested model, the actual model from its transcript, the execution mode, tokens and estimated cost
+   An unfinished workflow is reported at Stop as unfinished.
+
+**What runs where.** Hooks cannot start agents. The main session executes every stage through Claude Code's Agent tool, and RM Context checks and records each step. No `claude -p` sessions, forks or parallel agents are used.
+
+**Foreground** needs `"env": { "CLAUDE_CODE_FORK_SUBAGENT": "0" }` in your Claude Code settings. In interactive sessions, subagents otherwise start in the background. In that case the workflow still runs one stage at a time:
+- the one-agent lock is held until the agent's SubagentStop, and its usage is recorded complete at that point
+- each stage reports `background` as its mode
+
+`rmc workflow status | list` show workflows. `rmc workflow cancel <W-id>` stops all later stages. Settings: `.rmcontext/config.json` → `"workflow": { "maxAttempts": 2, "maxQaLoops": 2 }`.
+
 ## Adaptive model routing
 
 Choosing the agent and choosing the model are separate decisions. The CLI picks a tier from the task category and its complexity signals:
@@ -582,6 +622,7 @@ Run `rmc help` for the full reference. All commands run in the current directory
 | `rmc routing` · `rmc route …` | Agent defaults; adaptive model choice, escalation, stats |
 | `rmc route usage \| cost \| report [--json]` | Actual token usage by session, route, agent and model; estimated cost; full report |
 | `rmc route benchmark [run --task <file> --main-model <id> [--approve] \| evaluate <B-id> … \| add \| report]` · `rmc route efficiency --category <c> --complexity <t> --main-model <id>` | Controlled direct vs delegated benchmarks (a run needs `--approve`: it starts billed sessions), manual quality evaluation, profiles, advisory recommendation |
+| `rmc workflow plan \| start \| done \| finish \| cancel \| context \| status \| list` | The `/rmc:run` state machine: stages, gates, retries, per-stage telemetry |
 | `rmc handoff add <file.json> \| list [--to agent]` | Structured hand-offs between roles |
 | `rmc api list [--framework f] [--status s] \| frameworks \| coverage [--json]` | Extracted routes with resolution status; framework capability matrix; per-framework coverage |
 | `rmc context "<prompt>" [--max-tokens n] [--json]` · `rmc context status` | Preview the knowledge added for a prompt; automatic-context diagnostics |
@@ -595,6 +636,7 @@ Run `rmc help` for the full reference. All commands run in the current directory
 | `/rmc:graph` · `/rmc:viewer` | Open the viewer |
 | `/rmc:link` | Register a related repository |
 | `/rmc:routing` | Show agent defaults, tiers and categories |
+| `/rmc:run <task>` | One task end to end: planned stages, specialist agents with routed models, verification, knowledge write-back, one result |
 | `/rmc:discover` · `/rmc:feature` · `/rmc:assess` | Workflows: new project, feature end to end, assessment of an existing project |
 | `/rmc:ba` · `/rmc:sa` · `/rmc:pm` · `/rmc:engineering` · `/rmc:devops` | Work with one role |
 | `/rmc:document` · `/rmc:fsd` · `/rmc:sipoc` · `/rmc:srs` · `/rmc:erd` · `/rmc:adr` · `/rmc:roadmap` · `/rmc:rtm` · `/rmc:gantt` | Documents and plans |
@@ -713,6 +755,7 @@ Parsing uses a built-in tokenizer and structural parser: no npm dependencies, no
 - **Structural extraction, not a compiler.** C# and Java route prefixes are resolved from constants, groups, base classes, configuration and call sites when they are statically known. Anything else (a prefix computed at runtime, reflection, runtime registration) is kept as a partial route with its unresolved part, known prefix and reason, marked `inferred`. In the other languages, router mount prefixes (`app.use('/api', router)`) and route groups are not composed yet. Heuristic links are marked `inferred`.
 - **Business intent comes from agents or people.** It is never inferred automatically from code.
 - **The model is applied only where the platform supports it.** No integration changes your main session's model.
+- **Workflows are executed by the main session.** Claude Code hooks cannot start agents, so `/rmc:run` depends on the main session making each Agent call. RM Context refuses to pass or finish a stage without the agent's recorded run, but it cannot force the call. Foreground execution depends on your `CLAUDE_CODE_FORK_SUBAGENT=0` setting; RM Context reports the mode each stage actually ran in.
 - **External tools for some exports.** PDF needs Chrome, Chromium or Edge (or set `RMC_CHROME`). DOCX needs pandoc. Mermaid in HTML exports needs network access to render.
 - **The viewer is a snapshot.** Rebuild it after a refresh. It was measured up to 10,000 nodes. Rendering every node of a very large view at once is slower than the module-cluster default.
 - **Cost figures are estimates.** They use Anthropic API list prices from `config/pricing.json` (update it when prices change). Subscription plans, Bedrock and Vertex are billed differently. Savings need at least 3 valid controlled benchmark pairs with equal quality; otherwise the report says INSUFFICIENT DATA. Benchmarks run in a fresh copy of the committed tree, so they do not reflect uncommitted work, MCP servers or user settings that are absent in a headless session.

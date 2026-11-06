@@ -30,7 +30,7 @@ export function autoConfig(c) {
   return conf;
 }
 
-const tokens = (s) => Math.ceil(String(s).length / 3.5);
+export const tokens = (s) => Math.ceil(String(s).length / 3.5);
 const trim = (s, n) => (s.length > n ? s.slice(0, n - 1) + '…' : s);
 
 // ---------- session start ----------
@@ -197,10 +197,14 @@ export function retrieve(c, prompt, override = {}) {
   // Group hits and pull in their most useful one-hop neighbours.
   const S = { modules: new Map(), impl: [], apis: [], data: [], tests: [], business: [], infra: [], related: [] };
   const seen = new Set();
+  let stale = 0;
   const put = (n, why) => {
     if (seen.has(n.id)) return; seen.add(n.id);
     const L = G.layerOf(n.type), where = loc(n);
-    const line = `${n.type === 'file' || n.type === 'test' ? n.name : `${n.type} ${n.name}`}${where && !where.startsWith(n.name) ? ` — ${where}` : ''}${conf(n)}${why ? ` (${why})` : ''}`;
+    // override.changed: files changed since the last scan (workflow packages). Knowledge from them is marked, never trusted as fresh.
+    const old = cfg.changed && (n.evidence || []).some((e) => cfg.changed.has(e.file));
+    if (old) stale++;
+    const line = `${n.type === 'file' || n.type === 'test' ? n.name : `${n.type} ${n.name}`}${where && !where.startsWith(n.name) ? ` — ${where}` : ''}${conf(n)}${old ? ' [stale]' : ''}${why ? ` (${why})` : ''}`;
     if (n.type === 'module') S.modules.set(n.id, n.name);
     else if (n.type === 'api') S.apis.push(line);
     else if (['table', 'entity', 'database'].includes(n.type)) S.data.push(line);
@@ -228,8 +232,9 @@ export function retrieve(c, prompt, override = {}) {
   const footer = ['Instruction: use this as existing project context. Verify the cited source before implementation decisions; [inferred] links are heuristics, not verified behaviour.',
     `More: rmc find <terms> · rmc impact <file|id>${docTypes.length ? ` · rmc doc new ${docTypes[0]} --title "…" --author <agent>` : ''}`].join('\n');
   let used = tokens(out.join('\n') + footer);
+  const KEY = { 'Business rules & requirements': 'business', Implementation: 'impl', APIs: 'apis', Data: 'data', Tests: 'tests', Infrastructure: 'infra', Documents: 'docs', Templates: 'templates', Notes: 'notes' };
   const section = (title, items, max) => {
-    if (!items.length) return;
+    if (!items.length || (cfg.sections && !cfg.sections.includes(KEY[title]))) return; // override.sections: a role's subset
     const head = `${title}:`;
     if (used + tokens(head) > budget) return;
     out.push(head); used += tokens(head);
@@ -250,7 +255,7 @@ export function retrieve(c, prompt, override = {}) {
   while (tokens(out.join('\n')) > budget && out.length > 3) out.splice(out.length - 2, 1);
   while (out.length > 3 && /:$/.test(out[out.length - 2])) out.splice(out.length - 2, 1); // no dangling section heading
   const text = out.length > 3 && tokens(out.join('\n')) <= budget ? out.join('\n') : '';
-  return { text: findSecrets(text).length ? '' : text, tokens: tokens(text), hits: hits.length, ms: Date.now() - t0, terms: terms.size, topScore: hits[0]?.score ?? 0 };
+  return { text: findSecrets(text).length ? '' : text, tokens: tokens(text), hits: hits.length, stale, ms: Date.now() - t0, terms: terms.size, topScore: hits[0]?.score ?? 0 };
 }
 
 // ---------- change tracking & coalesced refresh ----------

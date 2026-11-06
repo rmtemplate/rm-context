@@ -14,10 +14,19 @@ const safe = (sid) => String(sid || 'default').replace(/[^\w-]/g, '');
 const lockFile = (sid) => path.join(os.tmpdir(), `rmc-delegation-${safe(sid)}.json`);
 const readLock = (sid) => { try { return JSON.parse(fs.readFileSync(lockFile(sid), 'utf8')); } catch { return null; } };
 export const clearLock = (sid) => { try { fs.rmSync(lockFile(sid), { force: true }); } catch { /* ignore */ } };
+const writeLock = (sid, l) => { try { fs.writeFileSync(lockFile(sid), JSON.stringify(l)); } catch { /* ignore */ } };
+export const lockHeld = (sid) => { const l = readLock(sid); return l && Date.now() - l.at < LOCK_TTL_MS ? l : null; };
+// A background agent's PostToolUse returns as soon as it starts: the lock stays until its SubagentStop (or the TTL).
+export const holdLock = (sid, agentId) => writeLock(sid, { ...(readLock(sid) || {}), agentId, async: true, at: Date.now() });
+export function releaseLock(sid, agentId) { const l = readLock(sid); if (l && (!l.agentId || l.agentId === agentId)) clearLock(sid); }
 
 // Returns { kind: 'background' | 'concurrent', reason } to deny, or null to allow. conf.background: 'deny' (default) | 'allow'.
 export function preAgent(input, conf = {}) {
   const ti = input.tool_input || {};
+  // agent_id is set when the hook fires inside a subagent: an RM Context agent never starts agents of its own.
+  if (input.agent_id && isRmcAgent(input.agent_type)) {
+    return { kind: 'nested', reason: 'RM Context agents do not start other agents. Finish your stage and return your hand-off; the main session runs the next stage.' };
+  }
   if (!isRmcAgent(ti.subagent_type)) return null;
   const allowBg = conf.background === 'allow' || process.env.RMC_ALLOW_BACKGROUND === '1';
   if (ti.run_in_background && !allowBg) {
@@ -29,7 +38,7 @@ export function preAgent(input, conf = {}) {
   if (lock && lock.toolUseId !== input.tool_use_id && Date.now() - lock.at < LOCK_TTL_MS) {
     return { kind: 'concurrent', reason: `RM Context runs one agent at a time: ${lock.agent} is still running. Wait for its result, then delegate the next role.` };
   }
-  try { fs.writeFileSync(lockFile(input.session_id), JSON.stringify({ toolUseId: input.tool_use_id, agent: ti.subagent_type, at: Date.now() })); } catch { /* ignore */ }
+  writeLock(input.session_id, { toolUseId: input.tool_use_id, agent: ti.subagent_type, at: Date.now() });
   return null;
 }
 
@@ -43,6 +52,16 @@ const sessionFile = (sid) => path.join(os.tmpdir(), `rmc-session-${safe(sid)}.js
 export const readSession = (sid) => { try { return JSON.parse(fs.readFileSync(sessionFile(sid), 'utf8')); } catch { return {}; } };
 export const writeSession = (sid, s) => { try { fs.writeFileSync(sessionFile(sid), JSON.stringify(s)); } catch { /* ignore */ } };
 export const clearSession = (sid) => { try { fs.rmSync(sessionFile(sid), { force: true }); } catch { /* ignore */ } };
+
+// PostToolUse and SubagentStop both see a finished agent; exactly one of them logs its delegation event.
+//   foreground: SubagentStop fires first and notes the agent as stopped; PostToolUse then logs it (complete).
+//   background: PostToolUse fires at launch and notes it as pending; SubagentStop later logs it (complete).
+const note = (sid, k, agentId, v) => { if (!sid || !agentId) return; const s = readSession(sid); s[k] = Object.fromEntries(Object.entries(s[k] || {}).slice(-20)); s[k][agentId] = v; writeSession(sid, s); };
+const take = (sid, k, agentId) => { if (!sid || !agentId) return null; const s = readSession(sid); const v = s[k]?.[agentId]; if (v === undefined) return null; delete s[k][agentId]; writeSession(sid, s); return v; };
+export const notePending = (sid, agentId, meta) => note(sid, 'pending', agentId, meta);
+export const takePending = (sid, agentId) => take(sid, 'pending', agentId);
+export const noteStopped = (sid, agentId) => note(sid, 'stopped', agentId, Date.now());
+export const takeStopped = (sid, agentId) => take(sid, 'stopped', agentId);
 
 export function currentTurn(sid, root) {
   if (!sid) return null;
@@ -96,7 +115,8 @@ export function turnUsage(t, transcript) {
   if (!u || !u.calls) return null;
   return { promptId: t.id, suggestionId: t.suggestion?.id || null, category: t.suggestion?.category || null, decision: t.suggestion?.decision || null,
     outcome: t.suggestion ? outcomeOf(t) : t.agents.length ? 'delegated' : 'direct', delegations: t.agents.length,
-    allocation: t.tx ? 'task' : 'session', calls: u.calls, mainAt: u.at, main: u.groups, overhead: u.overhead, ms: Date.now() - t.at };
+    allocation: t.tx ? 'task' : 'session', calls: u.calls, mainAt: u.at, main: u.groups, overhead: u.overhead, ms: Date.now() - t.at,
+    ...(t.workflows?.length ? { workflows: t.workflows } : {}) };
 }
 
 // Execution facts for one finished delegation, from Claude Code's own records (never from configuration).
@@ -106,17 +126,11 @@ export function agentFacts(input) {
   const id = res.agentId || res.agent_id;
   const facts = { agent: ti.subagent_type, agentId: id || null, requested: ti.model || null, models: {}, shape: null, usage: null, async: res.isAsync === true || res.status === 'async_launched' || undefined };
   if (input.transcript_path && id) {
-    const dir = path.join(input.transcript_path.replace(/\.jsonl$/, ''), 'subagents');
-    try { const m = JSON.parse(fs.readFileSync(path.join(dir, `agent-${id}.meta.json`), 'utf8')); facts.shape = m.requestShape || null; } catch { /* older Claude Code: no meta file */ }
-    try {
-      for (const line of fs.readFileSync(path.join(dir, `agent-${id}.jsonl`), 'utf8').split('\n')) {
-        if (!line.includes('"assistant"')) continue;
-        try { const d = JSON.parse(line); const m = d.type === 'assistant' && d.message?.model; if (m && m !== '<synthetic>') facts.models[m] = (facts.models[m] || 0) + 1; } catch { /* partial line */ }
-      }
-    } catch { /* transcript not found */ }
-    // Cumulative usage of every API call the subagent made (one per message id). A background agent may still be running: partial.
-    const u = readUsage(path.join(dir, `agent-${id}.jsonl`));
-    if (u?.calls) facts.usage = { calls: u.calls, at: u.at, groups: u.groups, partial: facts.async || facts.shape === 'background' || undefined };
+    const t = transcriptFacts(path.join(input.transcript_path.replace(/\.jsonl$/, ''), 'subagents', `agent-${id}.jsonl`));
+    facts.shape = t.shape;
+    facts.models = t.models;
+    // A background agent may still be running: its usage so far is partial (SubagentStop records the complete figure).
+    if (t.usage) facts.usage = { ...t.usage, partial: facts.async || facts.shape === 'background' || undefined };
   }
   if (!Object.keys(facts.models).length && typeof res.resolvedModel === 'string') facts.resolvedModel = res.resolvedModel;
   // tokens = Claude Code's totalTokens: the context size of the agent's LAST API call, not its cumulative usage (kept for
@@ -125,6 +139,23 @@ export function agentFacts(input) {
   facts.tokens = res.totalTokens ?? (usage.input_tokens != null ? (usage.input_tokens || 0) + (usage.output_tokens || 0) + (usage.cache_read_input_tokens || 0) + (usage.cache_creation_input_tokens || 0) : null);
   facts.durationMs = res.totalDurationMs ?? null;
   return facts;
+}
+
+// What a subagent transcript (subagents/agent-<id>.jsonl + .meta.json) proves: the models that answered, Claude Code's
+// requestShape, and the cumulative usage of every API call (one per message id). Never configuration.
+export function transcriptFacts(file) {
+  const t = { models: {}, shape: null, usage: null };
+  if (!file) return t;
+  try { t.shape = JSON.parse(fs.readFileSync(file.replace(/\.jsonl$/, '.meta.json'), 'utf8')).requestShape || null; } catch { /* older Claude Code: no meta file */ }
+  try {
+    for (const line of fs.readFileSync(file, 'utf8').split('\n')) {
+      if (!line.includes('"assistant"')) continue;
+      try { const d = JSON.parse(line); const m = d.type === 'assistant' && d.message?.model; if (m && m !== '<synthetic>') t.models[m] = (t.models[m] || 0) + 1; } catch { /* partial line */ }
+    }
+  } catch { /* transcript not found */ }
+  const u = readUsage(file);
+  if (u?.calls) t.usage = { calls: u.calls, at: u.at, groups: u.groups };
+  return t;
 }
 
 export function postAgentText(f) {

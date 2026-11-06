@@ -56,5 +56,14 @@ It then passes the returned `model` (`haiku`, `sonnet` or `opus`) to the Agent t
 - **Only the delegated agent's model is set.** A plugin cannot change your main session's model; use `/model` for that. RM Context never claims it switched the session model.
 - **The Agent tool takes aliases** (`opus`, `sonnet`, `haiku`). A full `claude-…` id in the configuration is passed as its family alias. If a model is unavailable on your account, the orchestrator retries once with its own model.
 - **The main session does the classification.** The CLI turns the category and signals into a model deterministically, but choosing the category and signals is a judgement made by the main session.
+- **Hooks cannot start agents.** `/rmc:run` workflows are executed by the main session through the Agent tool. RM Context's hooks then do what Claude Code documents for them:
+  - **PreToolUse** allows or denies a call.
+  - **SubagentStart** adds `additionalContext` to the starting subagent.
+  - **SubagentStop** gives `agent_id`, `agent_type` and `agent_transcript_path`.
+  - **Stop** shows a `systemMessage`.
+  - **UserPromptSubmit** adds context but cannot rewrite the prompt.
+
+  A stage cannot pass without its agent's recorded run, but nothing can force the main session to make the call.
+- **Foreground needs your setting.** In interactive sessions subagents start in the background unless `CLAUDE_CODE_FORK_SUBAGENT=0` is set (`"env"` in your Claude Code settings; a plugin cannot set it). RM Context reports the mode from Claude Code's `requestShape`. It keeps the one-agent lock until SubagentStop, so a background agent never overlaps the next stage.
 - **Benchmarks run headless.** `rmc route benchmark run --approve` starts `claude -p` twice with this plugin (`--plugin-dir`) in fresh copies of the committed tree. It uses your Claude Code login and is billed; without `--approve` it only prints the plan. A headless session has no MCP servers or interactive approvals from your normal setup, so its numbers describe that setup.
 - **Agent frontmatter `model` values** are only used when Claude Code delegates without a `model` parameter, for example on automatic delegation.

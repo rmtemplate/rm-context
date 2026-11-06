@@ -32,6 +32,12 @@ Core
   route benchmark evaluate <B-id> --side direct|delegated --completed yes|no --criteria <passed>/<total> [--correct yes|no] [--missing n] [--false-positives n] [--rework yes|no] [--accepted yes|no]
   route benchmark add --direct <P-id> --delegated <P-id> [--note "…"]   Declare a pair from two prompts (listed, never verified; alias: route baseline)
   route efficiency [--category c --complexity low|medium|high --main-model id] [--json]   Historical profiles and an advisory recommendation
+  workflow plan --task "<task>" [--category c] [--signals s,s] [--model m] [--criteria "a; b"] [--session-model id]
+                                   Smallest sufficient workflow (/rmc:run): stages, agents and models; the main session runs them
+  workflow start <W-id>            Start the next stage: records its route, prepares its knowledge package, prints the Agent call
+  workflow done <W-id> <S-id> --status pass|fail --handoff -|<H-id> [--criteria p/t] [--reason "…"] [--escalate]
+                                   Stage gate: pass needs the agent's recorded run and a hand-off; fail → bounded retry or back to implementation
+  workflow finish <W-id> | cancel <W-id> | context <W-id> <S-id> | status [<W-id>] | list [--json]
   handoff add <file.json> | list [--to agent]
   api list [--framework f] [--status complete|partial|unresolved] [--json]   Extracted HTTP routes with resolution status
   api frameworks [--json]          Route framework capability matrix (Supported / Partial / Detected / Planned)
@@ -250,6 +256,12 @@ async function main(argv) {
       const r = X.retrieve(c, prompt, args['max-tokens'] ? { maxContextTokens: Number(args['max-tokens']) } : {});
       return out(args.json ? r : r.text || `No sufficiently relevant knowledge (searched ${r.terms} term(s)).`);
     }
+    case 'workflow': {
+      requireInit(c);
+      const W = await import('./lib/workflow.mjs');
+      return out(await W.cli(c, sub, rest, args));
+    }
+
     case 'handoff': {
       requireInit(c);
       const { addHandoff, listHandoffs } = await import('./lib/project.mjs');

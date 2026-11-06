@@ -172,6 +172,7 @@ If the stronger model is blocked too, report to the user.
 - Reuse hand-offs instead of re-scanning.
 - Run `rmc refresh` only when files changed.
 - An `Efficiency (advisory, routing unchanged):` line under the routing block is advice from past benchmarks. Delegate with the routed `model` anyway; mention the advice only if the user asks about cost.
+- **`/rmc:run` workflows.** Run every stage the plan lists with `rmc workflow start` → the Agent call it prints → `rmc workflow done`. Never do a stage's work yourself, never skip a stage, and never call `rmc workflow finish` before every stage passed. As an agent inside a workflow, end your reply with the json hand-off your stage package asks for, and never start other agents.
 - Never run `rmc route benchmark run --approve` on your own. It starts two billed headless sessions. Show the plan (the same command without `--approve`) and run it only after the user explicitly agrees.
 
 **Main session.** `rmc route` sets the model of the delegated agent only. The main session's model never changes; only the user changes it, with `/model`. Never tell the user it was switched. The notice describes a delegation to an agent on that model, not a change of the main session's model.

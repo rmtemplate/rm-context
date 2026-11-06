@@ -1,5 +1,5 @@
 {
-  "description": "RM Context automatic context: compact session summary, relevant knowledge per prompt, one incremental refresh per turn after file changes, and a delegation guard (RM Context agents run in the foreground, one at a time; the model that actually ran is reported from the subagent transcript). Deterministic; no model calls.",
+  "description": "RM Context automatic context: compact session summary, relevant knowledge per prompt, one incremental refresh per turn after file changes, and a delegation guard (RM Context agents run in the foreground, one at a time, never nested; during a /rmc:run workflow only the started stage runs, and it receives its knowledge package at SubagentStart; the model that actually ran is reported from the subagent transcript). Deterministic; no model calls.",
   "hooks": {
     "SessionStart": [
       { "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/hooks.mjs\" session-start", "timeout": 15 } ] }
@@ -16,6 +16,12 @@
     ],
     "PostToolUseFailure": [
       { "matcher": "Agent|Task", "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/hooks.mjs\" post-agent", "timeout": 5 } ] }
+    ],
+    "SubagentStart": [
+      { "matcher": "^(rmc|rm-context):", "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/hooks.mjs\" subagent-start", "timeout": 5 } ] }
+    ],
+    "SubagentStop": [
+      { "matcher": "^(rmc|rm-context):", "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/hooks.mjs\" subagent-stop", "timeout": 10 } ] }
     ],
     "Stop": [
       { "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/hooks.mjs\" stop", "timeout": 60 } ] }

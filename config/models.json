@@ -184,6 +184,11 @@
       "agent": "qa",
       "label": "Verification against acceptance criteria"
     },
+    "verification": {
+      "tier": "low",
+      "agent": "quick-qa",
+      "label": "Quick verification of a completed workflow stage"
+    },
     "impact": {
       "tier": "medium",
       "agent": "architecture",

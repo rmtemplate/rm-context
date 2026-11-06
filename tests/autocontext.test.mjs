@@ -24,8 +24,9 @@ const setConfig = (dir, patch) => { const f = path.join(dir, '.rmcontext/config.
 test('hooks.json wires the lifecycle events to the hook script', () => {
   const h = readJson(path.join(ROOT, 'hooks/hooks.json')).hooks;
   // PreToolUse / PostToolUseFailure (and the second PostToolUse entry) belong to the delegation guard, see delegation.test.mjs.
-  assert.deepEqual(Object.keys(h).sort(), ['PostToolUse', 'PostToolUseFailure', 'PreToolUse', 'SessionStart', 'Stop', 'UserPromptSubmit']);
-  for (const [ev, arg] of [['SessionStart', 'session-start'], ['UserPromptSubmit', 'prompt'], ['PostToolUse', 'post-tool'], ['Stop', 'stop']])
+  // SubagentStart / SubagentStop: workflow stage packages and background completion, see workflow.test.mjs.
+  assert.deepEqual(Object.keys(h).sort(), ['PostToolUse', 'PostToolUseFailure', 'PreToolUse', 'SessionStart', 'Stop', 'SubagentStart', 'SubagentStop', 'UserPromptSubmit']);
+  for (const [ev, arg] of [['SessionStart', 'session-start'], ['UserPromptSubmit', 'prompt'], ['PostToolUse', 'post-tool'], ['Stop', 'stop'], ['SubagentStart', 'subagent-start'], ['SubagentStop', 'subagent-stop']])
     assert.match(h[ev][0].hooks[0].command, new RegExp(`scripts/hooks\\.mjs" ${arg}$`));
   assert.match(h.PostToolUse[0].matcher, /Write/);
   assert.match(h.PostToolUse[0].matcher, /Edit/);

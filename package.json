@@ -1,12 +1,12 @@
 {
   "name": "rm-context",
-  "version": "0.4.3",
+  "version": "0.4.4",
   "private": true,
   "description": "RM Context — Claude Code plugin: project intelligence and engineering team.",
   "type": "module",
   "bin": { "rmc": "scripts/rmc.mjs" },
   "scripts": {
-    "test": "node --test tests/core.test.mjs tests/extract.test.mjs tests/graph.test.mjs tests/docs.test.mjs tests/pm.test.mjs tests/viewer-plugin.test.mjs tests/routing.test.mjs tests/autocontext.test.mjs tests/viewer.test.mjs tests/routes.test.mjs tests/routes-qa.test.mjs tests/routes-qa2.test.mjs tests/delegation.test.mjs tests/suggest.test.mjs tests/efficiency.test.mjs tests/benchmark.test.mjs",
+    "test": "node --test tests/core.test.mjs tests/extract.test.mjs tests/graph.test.mjs tests/docs.test.mjs tests/pm.test.mjs tests/viewer-plugin.test.mjs tests/routing.test.mjs tests/autocontext.test.mjs tests/viewer.test.mjs tests/routes.test.mjs tests/routes-qa.test.mjs tests/routes-qa2.test.mjs tests/delegation.test.mjs tests/suggest.test.mjs tests/efficiency.test.mjs tests/benchmark.test.mjs tests/workflow.test.mjs",
     "validate": "claude plugin validate . --strict && claude plugin validate agents --strict && claude plugin validate skills --strict && claude plugin validate commands --strict"
   },
   "engines": { "node": ">=18.17" },
