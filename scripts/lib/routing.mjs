@@ -55,7 +55,7 @@ export function classify(baseTier, sig) {
   return { tier: baseTier, why: mid };
 }
 
-// opts: { agent, category, signals, model, sessionModel, workflow, handoff, contextReuse, escalate, reason, record, suggested }
+// opts: { agent, category, signals, model, sessionModel, workflow, handoff, contextReuse, escalate, reason, record, suggested, origin }
 export function route(c, opts = {}) {
   const cfg = loadModelConfig(c);
   const notes = [];
@@ -128,6 +128,10 @@ export function route(c, opts = {}) {
   const fam = (m) => /(opus|sonnet|haiku)/.exec(String(m || '').toLowerCase())?.[1] || null;
   r.sessionModel = fam(opts.sessionModel);
   r.notice = notice(roleName(agent), r.model, r.sessionModel, cfg.routing.noticeLanguage);
+  // Where the route came from (telemetry only; it never changes the model): suggested routing, a workflow step, a slash
+  // command (commands pass --origin command), or manual. An escalation keeps the origin of the route it escalates.
+  r.origin = prev?.origin || (opts.suggested ? 'suggested' : opts.workflow ? 'workflow' : opts.origin === 'command' ? 'command' : 'manual');
+  r.requested = opts.model || null; // the model the user asked for explicitly; r.model is the resolved one
   r.promptId = turn?.id || null;
   r.suggestionId = turn?.suggestion?.id || null;
   r.followsSuggestion = turn?.suggestion ? turn.suggestion.agent === agent : null;
@@ -266,8 +270,8 @@ export function readRoutes(c) {
   return fs.readFileSync(metricsFile(c), 'utf8').split('\n').filter(Boolean).flatMap((l) => { try { return [JSON.parse(l)]; } catch { return []; } });
 }
 
-// Hook events (autocontext.jsonl): suggestion, suggestion-outcome, delegation, delegation-denied. null when never recorded.
-function hookEvents(c) {
+// Hook events (autocontext.jsonl): suggestion, suggestion-outcome, delegation, delegation-denied, turn-usage. null when never recorded.
+export function hookEvents(c) {
   const f = c.p('state', 'autocontext.jsonl');
   if (!fs.existsSync(f)) return null;
   return fs.readFileSync(f, 'utf8').split('\n').filter(Boolean).flatMap((l) => { try { return [JSON.parse(l)]; } catch { return []; } });

@@ -125,7 +125,7 @@ rmc route categories            # categories, tiers and signals
 
   Unsupported values fall back to `routing.fallbackTier`.
 - **Escalation.** `rmc route --escalate <R-id> --reason "…" --handoff <H-id>` moves one subtask up a tier, at most `maxEscalations` times, and carries the previous agent's hand-off forward so the work isn't repeated.
-- **Metrics.** `rmc route stats` reports routes by tier, agent and category, plus escalations, context reuse and agents per workflow. It also separates suggestions generated, followed, ignored (direct response) and outcome unknown; delegations through `rmc route` versus direct agent calls; actual model verified versus unavailable; foreground runs; and rejected background or concurrent calls. A metric with no telemetry shows as `unavailable`, not an estimate. Only metadata is stored; never prompts or code.
+- **Metrics.** `rmc route stats` reports routes by tier, agent and category, plus escalations, context reuse and agents per workflow. It also separates suggestions generated, followed, ignored (direct response) and outcome unknown; delegations through `rmc route` versus direct agent calls; actual model verified versus unavailable; foreground runs; and rejected background or concurrent calls. A **Routing efficiency** block adds actual token usage, estimated cost and the direct-vs-delegated comparison (see below). A metric with no telemetry shows as `unavailable`, not an estimate. Only metadata is stored; never prompts or code.
 
 ### Routing suggestions for ordinary prompts (Claude Code)
 
@@ -140,7 +140,45 @@ Slash commands always route. Ordinary prompts get a **suggestion** — a determi
 Delegation is synchronous and visible:
 - **Foreground, one agent at a time.** RM Context agents run in the foreground and the main session waits for the result. Roles run one after another, never in parallel, unless the user explicitly asks for it. A `PreToolUse` hook enforces this: it denies an `rmc:*` agent call with `run_in_background`, and a second `rmc:*` agent while one is still running. To allow background or parallel agents for a project, set `"delegation": { "background": "allow" }` in `.rmcontext/config.json`. Other plugins' agents are not affected.
 - **Notice before a switch.** `rmc route --session-model <main session model>` prints a `Notice:` line that the main session shows before delegating, such as `Perpindahan ke model Haiku, karena bertugas sebagai Quick QA.` If the subagent model is the same as the main session's, it says so instead (`… sama dengan model sesi utama (tidak ada perpindahan model)`). Nothing is shown when the main session does the work itself. Set `routing.noticeLanguage` to `en` for English notices (`Switching to Haiku, acting as Quick QA.` / `Delegating to Senior Engineer with Sonnet, same as the main session model.`).
-- **The model that actually ran.** The notice states what is requested. After the agent returns, a `PostToolUse` hook reads the subagent's own transcript and gives the main session the model recorded on each of its turns and Claude Code's `requestShape` (foreground or background). The main session reports that. When the transcript cannot be read, it reports `Delegation started; actual model not yet verified.` rather than repeating the configured one. Each delegation is logged as metadata (agent, requested model, actual model, mode, tokens, duration) in `.rmcontext/state/autocontext.jsonl`, never the prompt.
+- **The model that actually ran.** The notice states what is requested. After the agent returns, a `PostToolUse` hook reads the subagent's own transcript and gives the main session the model recorded on each of its turns and Claude Code's `requestShape` (foreground or background). The main session reports that. When the transcript cannot be read, it reports `Delegation started; actual model not yet verified.` rather than repeating the configured one. Each delegation is logged as metadata (agent, requested model, actual model, mode, token usage, duration, correlation ids) in `.rmcontext/state/autocontext.jsonl`, never the prompt.
+
+### Routing cost and token efficiency (Claude Code)
+
+`rmc route usage`, `rmc route cost` and `rmc route report` show whether delegating to a cheaper model actually saved anything:
+- **Actual usage only.** The hooks read token usage from Claude Code's own transcripts: input, output, 5-minute and 1-hour cache writes, cache reads, the actual model id, speed and inference geo. Each API call is counted once (Claude Code repeats its usage on every content-block line). Usage is never estimated from text length. If a transcript cannot be read, the figure is `unavailable`.
+- **Main session vs subagents.**
+  - The prompt hook records where the main transcript ends. The Stop hook sums the API calls after that point, so main-session usage is **per prompt**.
+  - Each delegation's usage is read from that subagent's own transcript and joined to the prompt by its id. Subagent tokens never appear in the main slice, so nothing is counted twice.
+  - The main-session calls that issued the delegation (the Agent call, `rmc route`) are reported as delegation overhead. They are already included in the main-session total.
+  - If a prompt's starting point is unknown, the usage is labelled `session-level` and never presented as one task's cost.
+  - Claude Code's `totalTokens` for an agent is the size of its *last* call, not its total, so it is not used.
+- **Pricing registry.** `config/pricing.json` lists USD prices per million tokens for each exact model id: input, output, both cache-write durations and cache reads, with provider, currency, effective date, source and pricing version. Haiku 5.5 prompts over 100,000 tokens, fast mode and US-only inference use their own documented rates. Historical usage is priced with the record in force on its date. A model without a price, such as a partner-platform id, keeps its token counts and shows cost `unavailable`. Costs are **estimates at Anthropic API list prices**; a Claude subscription plan is billed differently.
+- **Direct vs delegated.** Savings = direct cost − delegated total cost, where delegated total = main session (including delegation overhead) + subagents. Verified savings come only from controlled benchmarks (below). `rmc route report` also shows an **observational estimate** from ordinary prompts with a routing suggestion, grouped by category: it needs at least 3 direct and 3 delegated prompts per group, and it is never presented as savings or used for a recommendation. RM Context never re-runs work to get a baseline.
+- **Route counting.** `rmc route stats` counts suggestions, routes, delegations and direct responses separately, each once per id: a suggestion is not a route, a route is not a delegation, and one agent making many API calls is one delegation. Routes record their **origin**: `command` (slash commands), `workflow`, `suggested` or `manual`. It reports the requested, resolved and actual subagent model separately. The actual model comes only from the subagent's transcript; it is never inferred from the request or the agent's frontmatter, and is shown as `unverified` when it could not be read.
+
+### Routing benchmarks (Claude Code)
+
+A controlled benchmark runs the same task twice from the same committed source state: once directly in the main session and once delegated. It then compares cost and tokens, given equal quality.
+
+1. **Describe the task** in a JSON file: `{ "id", "category", "complexity": "low|medium|high", "objective", "acceptanceCriteria": [...], "deliverable"?, "agent"? }`. Only its fingerprint (a hash) is stored.
+2. **Plan:** `rmc route benchmark run --task task.json --main-model claude-opus-5-5`. This prints the plan and exits without running. **A run starts two billed headless Claude Code sessions**, so it needs `--approve`. Agents are told never to add `--approve` without the user's explicit agreement. Stats and reports never start a run.
+3. **Run:** add `--approve`. Each side runs in its own session, in a fresh copy of `git HEAD` (the run refuses uncommitted changes), with the same instructions and criteria. The order alternates between runs. Usage is read from the transcripts and checked against Claude Code's own totals for that session. Each side's result is saved in the system temp directory for you to review, never in `.rmcontext`.
+4. **Evaluate both sides yourself:** `rmc route benchmark evaluate <B-id> --side direct|delegated --completed yes|no --criteria <passed>/<total> [--correct yes|no] [--missing N] [--false-positives N] [--rework yes|no] [--accepted yes|no]`. No LLM evaluator is used. A pair counts only when both sides completed with equal results on every recorded measure.
+5. **Report:** `rmc route benchmark` lists pairs with their validity reasons. `rmc route benchmark report` shows profiles per category, complexity, main model and subagent model.
+
+A pair is invalid if:
+- either side failed or timed out, or has no per-prompt usage
+- the recorded usage differs from Claude Code's totals
+- the direct side delegated, or the delegated side made no RM Context delegation
+- the actual subagent model is unverified, or pricing is incomplete
+- the main models differ, or both sides share a session
+- the quality is not comparable
+
+Pairs declared from existing prompts (`rmc route benchmark add` / `rmc route baseline --direct <P-id> --delegated <P-id>`) are listed but never verified, because their source state and instructions are unknown.
+
+A profile is **VERIFIED** with at least 3 valid pairs (5–10 recommended), **INSUFFICIENT DATA** with fewer, and **NOT COMPARABLE** when every pair is invalid. Token savings and cost savings are reported separately, since a cheaper model can use more tokens. A savings figure appears only when a profile is VERIFIED.
+
+**Efficiency recommendation.** `rmc route efficiency --category <c> --complexity <low|medium|high> --main-model <id>` names the cheaper option for that exact profile, or says `Insufficient historical benchmark data. Using existing adaptive routing policy.`. Once benchmarks exist, `rmc route` prints the same advice as an `Efficiency (advisory, routing unchanged):` line. It **never changes the routed model**: user model, project and agent overrides, adaptive tiers and fallback still apply.
 
 **Platform limits.** RM Context recommends a model for each delegated agent. Applying it depends on the platform. In Claude Code, the model is set on the subagent; **your main session's model never changes** (use `/model` for that). Without an adapter, `rmc route` is a recommendation only.
 
@@ -542,6 +580,8 @@ Run `rmc help` for the full reference. All commands run in the current directory
 | `rmc doc types \| new \| validate \| revise \| regenerate \| status \| export \| list` | Documents |
 | `rmc pm init \| validate \| progress \| gantt \| mermaid \| health` | Plan, Gantt and health |
 | `rmc routing` · `rmc route …` | Agent defaults; adaptive model choice, escalation, stats |
+| `rmc route usage \| cost \| report [--json]` | Actual token usage by session, route, agent and model; estimated cost; full report |
+| `rmc route benchmark [run --task <file> --main-model <id> [--approve] \| evaluate <B-id> … \| add \| report]` · `rmc route efficiency --category <c> --complexity <t> --main-model <id>` | Controlled direct vs delegated benchmarks (a run needs `--approve`: it starts billed sessions), manual quality evaluation, profiles, advisory recommendation |
 | `rmc handoff add <file.json> \| list [--to agent]` | Structured hand-offs between roles |
 | `rmc api list [--framework f] [--status s] \| frameworks \| coverage [--json]` | Extracted routes with resolution status; framework capability matrix; per-framework coverage |
 | `rmc context "<prompt>" [--max-tokens n] [--json]` · `rmc context status` | Preview the knowledge added for a prompt; automatic-context diagnostics |
@@ -624,7 +664,7 @@ The same file also holds:
 - **Refused:** graph writes and documents that contain secret-like content (keys, tokens, passwords in connection strings).
 - **Your text is preserved.** Generated sections are fenced by markers; text outside them, and files without markers, are never overwritten.
 - **Approval is yours.** Documents become Approved only with an explicit `--approved-by`.
-- **Routing metrics and the auto-context log hold metadata only.** No prompt text and no source code are stored.
+- **Routing metrics and the auto-context log hold metadata only.** No prompt text and no source code are stored. Usage records hold token counts, model ids and correlation ids, never transcript content.
 - **Injected context and the viewer are filtered.** Lines that look like credentials are dropped from prompt context, and from the notes and hand-offs embedded in the viewer.
 
 ## Compatibility matrix
@@ -675,6 +715,7 @@ Parsing uses a built-in tokenizer and structural parser: no npm dependencies, no
 - **The model is applied only where the platform supports it.** No integration changes your main session's model.
 - **External tools for some exports.** PDF needs Chrome, Chromium or Edge (or set `RMC_CHROME`). DOCX needs pandoc. Mermaid in HTML exports needs network access to render.
 - **The viewer is a snapshot.** Rebuild it after a refresh. It was measured up to 10,000 nodes. Rendering every node of a very large view at once is slower than the module-cluster default.
+- **Cost figures are estimates.** They use Anthropic API list prices from `config/pricing.json` (update it when prices change). Subscription plans, Bedrock and Vertex are billed differently. Savings need at least 3 valid controlled benchmark pairs with equal quality; otherwise the report says INSUFFICIENT DATA. Benchmarks run in a fresh copy of the committed tree, so they do not reflect uncommitted work, MCP servers or user settings that are absent in a headless session.
 - **Prompt retrieval is lexical.** It matches identifiers, paths and a built-in list of synonyms, including Indonesian terms. It does not understand meaning the way a model does.
 
 ## Roadmap

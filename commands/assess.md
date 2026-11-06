@@ -12,7 +12,7 @@ Run **workflow C (existing project assessment)**. Focus: $ARGUMENTS
 Project status:
 !`node "${CLAUDE_PLUGIN_ROOT}/scripts/rmc.mjs" status 2>&1 | head -12`
 
-Model routing: before each step, run `rmc route --agent <role> --category <category> --workflow <slug> --session-model <your model id> [--signals …] [--handoff <H-id of the previous step>]`, show the user its `Notice:` line exactly as printed, and pass its `model`. Each step is routed on its own, so the same role can get a different model for a different step. See *Model routing* in the `team-workflows` skill.
+Model routing: before each step, run `rmc route --origin command --agent <role> --category <category> --workflow <slug> --session-model <your model id> [--signals …] [--handoff <H-id of the previous step>]`, show the user its `Notice:` line exactly as printed, and pass its `model`. Each step is routed on its own, so the same role can get a different model for a different step. See *Model routing* in the `team-workflows` skill.
 
 Follow workflow C in the `team-workflows` skill.
 1. Run `rmc init`, or `rmc refresh` if already initialized. If `context/architecture.md` is missing, delegate to **architecture** to write the context notes.

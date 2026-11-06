@@ -190,6 +190,52 @@ Every route reports `mainSessionModelChanged: false`. Subagent models never chan
   3. General question: no suggestion.
 
 
+### Routing cost & token efficiency
+
+- **Sources, verified against Claude Code 2.1.319.**
+  - The main transcript (`transcript_path`) and `subagents/agent-<agentId>.jsonl` hold one line per content block. Every line repeats the API message's `message.id` and `usage`: `input_tokens`, `output_tokens`, `cache_creation_input_tokens` with its `cache_creation.ephemeral_5m/1h_input_tokens` split, `cache_read_input_tokens`, `speed`, `service_tier` and `inference_geo`.
+  - Summing once per message id equals the session's own `cost-state.modelUsage` totals, per model.
+  - The Agent `tool_response.usage`/`totalTokens` covers only the agent's last call, so it is not used.
+- **Collector, `usage.mjs`.** `readUsage(file, { from, skipSidechain })` returns `{ calls, at, groups, overhead }`.
+  - Groups are keyed by actual model, speed, geo, service tier, and whether the prompt exceeded 100K tokens.
+  - `overhead` = the calls whose content issues an `Agent`/`Task` tool call or a Bash `rmc route`.
+- **Correlation.**
+  - `startTurn` stores `tx: { path, offset }`, the transcript size when the prompt is submitted.
+  - `endTurn` (Stop, or the next prompt) logs `turn-usage { sid, promptId, suggestionId, category, decision, outcome, allocation: task|session, calls, mainAt, main, overhead, ms }`.
+  - `post-agent` logs `delegation { …, delegationId, agentId, usage: { calls, at, groups, partial? } }`.
+  - All of it is token counts and ids, never content.
+- **Cost, `efficiency.mjs`.**
+  - `priceFor(reg, model, at)` picks the record for that exact id or alias with the latest `effectiveFrom` on or before the date (`null` = since before any dated record).
+  - `groupCost` returns `usd: null` with a reason for any group without a price: an unknown id, priority tier, an unknown geo, a speed without a rate, or cache writes with no TTL split.
+  - `analyze()` builds per-prompt tasks, which are main plus joined delegations. Sessions with only `session`-allocation records count once, at their latest record, and are never tasks.
+- **Observational comparison, `compare()`.** Tasks with a suggestion and complete data, grouped by `category|decision`, needing ≥ `MIN_SAMPLES` (3) per side. The direct side is weighted by each group's delegated count. Otherwise unavailable. Shown in `rmc route report` only, labelled as an estimate, and never used by benchmarks or recommendations.
+- **Dedupe.** `dedupe(events)` keeps the last event per id: `delegationId`, `sid|promptId` for `turn-usage`, the suggestion id. Events without an id are kept.
+- **Distribution, `distribution(routes, events)`.** Routes come from `routing.jsonl`, deduped by route id, by `origin` / agent / tier / resolved model / user-requested model. Suggestions, delegations and prompts come from telemetry. The actual model is the subagent transcript's model or `unverified`.
+  - `savings(direct, delegated)` → `{ usd, pct, interpretation }`, where interpretation is `delegated cheaper`, `delegated more expensive`, `equal` or `unknown`.
+
+### Routing benchmarks
+
+`benchmark.mjs` sits beside the routing engine; nothing in routing depends on it. It reuses the usage collector, pricing (`measure`, `costOf`), telemetry snapshots (`snapshot`) and the CLI.
+
+- **Store.** `state/benchmarks.jsonl` holds two record types:
+  - `{ type: 'benchmark', id: B-…, origin: run|declared, taskId, category, complexity, fingerprint, criteria, snapshot: { commit, tree }, mainModel, order, runs: { direct, delegated } }`. Each run holds `{ runId, sessionId, status, ms, turn, routes, usageCheck }`.
+  - `{ type: 'evaluation', benchmarkId, side, completed, criteriaPassed, criteriaTotal, correct?, missingFindings?, falsePositives?, rework?, accepted?, evaluator: 'manual' }`.
+  - Legacy `baselines.jsonl` records are read as declared `B-legacy-N`. No task text, prompt or output is stored.
+- **Run, `runBenchmark()`.**
+  - Without `approve`, it returns the plan.
+  - Otherwise `sourceSnapshot()` requires a clean tracked tree. Each side runs in a `git archive HEAD` copy, which gets `rmc init`, then `claude -p <instruction> --model <main> --plugin-dir <this plugin> --output-format json --allowedTools …`, using the same task text and mode line from `config/benchmark.json`.
+  - The turn snapshot comes from the copy's own telemetry. `usageCheck` compares it with `modelUsage` (`match|mismatch|unavailable`).
+  - `RMC_CLAUDE` replaces the binary (a `.mjs` stand-in in tests).
+- **Validity, `assess()`.** It lists every reason a pair fails. It is `pending-evaluation` until both sides are evaluated. `quality()` uses each side's latest evaluation and requires equal values on every measure either side recorded.
+- **Profiles, `profiles()`.**
+  - Keyed by `category|complexity|mainModel|agent|subModel`; averages use valid pairs only.
+  - Status: VERIFIED at ≥ `minPairs`; NOT COMPARABLE when every pair is invalid; otherwise INSUFFICIENT DATA.
+  - `recommendFor()` matches the exact profile only, and is advisory: `rmc route` adds it as `r.efficiency` after the model is resolved.
+- **Limits.**
+  - A Stop hook re-entry (`stop_hook_active`) after the turn ended is not counted.
+  - A background agent's usage is marked `partial` when it returns.
+  - Partner-platform model ids, Sonnet 4.5 / 4 (long-context rates not modelled) and other unpriced models report tokens without cost.
+
 The core/adapter split is described in [INTEGRATION_ARCHITECTURE.md](INTEGRATION_ARCHITECTURE.md).
 
 ## Viewer

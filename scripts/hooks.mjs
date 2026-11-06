@@ -4,9 +4,11 @@
 //   prompt         → relevant .rmcontext knowledge for the submitted prompt, within the token budget, plus an optional
 //                    one-line routing suggestion (deterministic classifier; Claude decides whether to delegate)
 //   post-tool      → records files changed by Write/Edit/MultiEdit/NotebookEdit, or a possibly-mutating Bash command
-//   stop           → one coalesced incremental refresh for everything recorded during the turn
+//   stop           → one coalesced incremental refresh for everything recorded during the turn, plus the turn's own
+//                    main-session token usage (read from the transcript, metadata only)
 //   pre-agent      → RM Context agents run in the foreground, one at a time (denies run_in_background / a second agent)
-//   post-agent     → reports the model that actually ran, read from the subagent transcript (never from configuration)
+//   post-agent     → reports the model that actually ran, read from the subagent transcript (never from configuration),
+//                    and records the subagent's cumulative token usage from the same transcript
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -50,8 +52,9 @@ try {
     let hits = 0;
     if (c) {
       const D = await import('./lib/delegation.mjs');
-      const done = D.endTurn(sid, c.root); // the previous prompt's turn, if Stop never ran (interrupted)
-      if (done) X.logEvent(c, { event: 'suggestion-outcome', sid, ...done });
+      const done = D.endTurn(sid, c.root, input.transcript_path); // the previous prompt's turn, if Stop never ran (interrupted)
+      if (done?.outcome) X.logEvent(c, { event: 'suggestion-outcome', sid, ...done.outcome });
+      if (done?.usage) X.logEvent(c, { event: 'turn-usage', sid, ...done.usage });
       if (conf.enabled && conf.promptRetrieval && eligible) {
         const r = X.retrieve(c, prompt);
         hits = r.hits;
@@ -60,7 +63,7 @@ try {
       }
       const s = eligible ? (await import('./lib/routing.mjs')).suggestForPrompt(c, prompt, { sessionModel: D.readSession(sid).sessionModel, hits }) : null;
       const { text, ...meta } = s || {};
-      const turn = D.startTurn(sid, c.root, s ? meta : null);
+      const turn = D.startTurn(sid, c.root, s ? meta : null, input.transcript_path);
       if (s) {
         // Metadata only: category, agent, model and confidence, never the prompt.
         X.logEvent(c, { event: 'suggestion', sid, promptId: turn?.id || null, ...meta });
@@ -86,7 +89,15 @@ try {
 
   else if (event === 'post-agent') {
     const D = await import('./lib/delegation.mjs');
-    if (input.hook_event_name === 'PostToolUseFailure') D.clearLock(input.session_id);
+    if (input.hook_event_name === 'PostToolUseFailure') {
+      D.clearLock(input.session_id);
+      // A failed RM Context delegation is still one delegation: recorded with status failed (no error text, which can carry content).
+      if (c && D.isRmcAgent(input.tool_input?.subagent_type)) {
+        const t = D.currentTurn(input.session_id, c.root);
+        X.logEvent(c, { event: 'delegation', sid: input.session_id, promptId: t?.id || null, suggestionId: t?.suggestion?.id || null, delegationId: input.tool_use_id || null,
+          agent: input.tool_input.subagent_type, requested: input.tool_input.model || null, actual: [], status: 'failed' });
+      }
+    }
     else if (D.isRmcAgent(input.tool_input?.subagent_type)) {
       D.clearLock(input.session_id);
       const f = D.agentFacts(input);
@@ -97,7 +108,9 @@ try {
         // Metadata only (agent, models, mode, size, correlation ids): never the prompt or the agent's output.
         X.logEvent(c, { event: 'delegation', sid: input.session_id, promptId: t?.id || null, suggestionId: t?.suggestion?.id || null,
           followed: t?.suggestion ? t.suggestion.agent === role : null, routeId: t?.route?.agent === role ? t.route.id : null,
-          agent: f.agent, requested: f.requested, actual: Object.keys(f.models), shape: f.shape || (f.async ? 'background' : null), tokens: f.tokens, ms: f.durationMs });
+          delegationId: input.tool_use_id || null, agentId: f.agentId, agent: f.agent, requested: f.requested, actual: Object.keys(f.models),
+          shape: f.shape || (f.async ? 'background' : null), status: f.async ? 'started' : 'completed', tokens: f.tokens, ms: f.durationMs,
+          startedAt: f.durationMs != null ? new Date(Date.now() - f.durationMs).toISOString() : null, usage: f.usage });
       }
       emit({ hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: D.postAgentText(f) } });
     }
@@ -106,8 +119,9 @@ try {
   else if (event === 'stop') {
     const D = await import('./lib/delegation.mjs');
     D.clearLock(input.session_id);
-    const done = c ? D.endTurn(input.session_id, c.root) : null;
-    if (done) X.logEvent(c, { event: 'suggestion-outcome', sid: input.session_id, ...done });
+    const done = c ? D.endTurn(input.session_id, c.root, input.transcript_path) : null;
+    if (done?.outcome) X.logEvent(c, { event: 'suggestion-outcome', sid: input.session_id, ...done.outcome });
+    if (done?.usage) X.logEvent(c, { event: 'turn-usage', sid: input.session_id, ...done.usage });
     if (c && conf.enabled && conf.incrementalRefresh && !input.stop_hook_active) {
       const s = await X.applyPending(c);
       if (s) {

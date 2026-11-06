@@ -9,7 +9,7 @@ Refresh RM Context. Arguments: $ARGUMENTS
 **RM Context CLI** — always invoke it with this exact command line (written `rmc` below):
 `node "${CLAUDE_PLUGIN_ROOT}/scripts/rmc.mjs"`
 
-Model routing: right before delegating, run `rmc route --agent documentation --category doc-update --session-model <your model id> [--signals …]`. Add signals only when they apply (see *Model routing* in the `team-workflows` skill). Show the user its `Notice:` line exactly as printed and its routing block, then call the Agent tool with its `model`.
+Model routing: right before delegating, run `rmc route --origin command --agent documentation --category doc-update --session-model <your model id> [--signals …]`. Add signals only when they apply (see *Model routing* in the `team-workflows` skill). Show the user its `Notice:` line exactly as printed and its routing block, then call the Agent tool with its `model`.
 
 1. Run `rmc refresh` (add `--full` only if the user passed it). Show the summary: files added, changed and deleted; stale agent items; orphaned edges; documents needing review.
 2. If nothing changed, say so and stop.

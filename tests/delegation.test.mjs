@@ -170,7 +170,7 @@ test('adaptive routing is unchanged: retrieval â†’ haiku, structured analysis â†
 test('every delegating command delegates in the foreground, one agent at a time, after showing the notice', () => {
   for (const c of commands) {
     const s = read(`commands/${c}.md`);
-    if (!/rmc route --agent/.test(s)) { assert.doesNotMatch(s, /Notice:/, `${c} does not delegate, so it shows no notice`); continue; }
+    if (!/rmc route (--origin command )?--agent/.test(s)) { assert.doesNotMatch(s, /Notice:/, `${c} does not delegate, so it shows no notice`); continue; }
     assert.match(s, /--session-model <your model id>/, `${c}: session model`);
     assert.match(s, /`Notice:` line exactly as printed/, `${c}: notice`);
     if (/Delegation rules/.test(s)) assert.match(s, /never set `run_in_background`.*one agent at a time/s, `${c}: foreground`);

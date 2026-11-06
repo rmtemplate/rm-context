@@ -6,6 +6,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { readUsage, fileSize } from './usage.mjs';
 
 export const isRmcAgent = (t) => /^(rmc|rm-context):/.test(String(t || ''));
 const LOCK_TTL_MS = 2 * 60 * 60 * 1000;
@@ -49,10 +50,14 @@ export function currentTurn(sid, root) {
   return t && t.root === root && Date.now() - t.at < TURN_TTL_MS ? t : null;
 }
 
-export function startTurn(sid, root, suggestion) {
+// transcript: the main transcript path. Its size now is where this prompt's usage starts (per-prompt allocation).
+// A session's first prompt fires before Claude Code creates the file (observed, 2.1.319): nothing precedes it, offset 0.
+export function startTurn(sid, root, suggestion, transcript) {
   if (!sid) return null;
   const s = readSession(sid);
-  s.turn = { id: `P-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`, at: Date.now(), root, suggestion: suggestion || null, route: null, agents: [] };
+  const offset = transcript ? fileSize(transcript) ?? 0 : null;
+  s.turn = { id: `P-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`, at: Date.now(), root, suggestion: suggestion || null, route: null, agents: [],
+    tx: offset != null ? { path: transcript, offset } : null };
   writeSession(sid, s);
   return s.turn;
 }
@@ -65,18 +70,33 @@ export function updateTurn(sid, root, fn) {
   return s.turn;
 }
 
+const outcomeOf = (t) => (t.agents.includes(t.suggestion.agent) ? 'followed' : t.agents.length ? 'other-agent' : 'direct');
+
 // Ends the current turn. Returns the outcome of its suggestion (null if it had none):
 // followed = the suggested agent ran · other-agent = a different RM Context agent ran · direct = no RM Context agent ran.
-export function endTurn(sid, root) {
+// transcript: the main transcript, so the turn's own main-session usage is measured too (see turnUsage).
+export function endTurn(sid, root, transcript) {
   if (!sid) return null;
   const s = readSession(sid);
   const t = s.turn;
   if (!t) return null;
   delete s.turn;
   writeSession(sid, s);
-  if (t.root !== root || !t.suggestion) return null;
-  const outcome = t.agents.includes(t.suggestion.agent) ? 'followed' : t.agents.length ? 'other-agent' : 'direct';
-  return { suggestionId: t.suggestion.id, promptId: t.id, agent: t.suggestion.agent, outcome, viaRoute: Boolean(t.route) };
+  if (t.root !== root) return null;
+  const outcome = t.suggestion ? { suggestionId: t.suggestion.id, promptId: t.id, agent: t.suggestion.agent, outcome: outcomeOf(t), viaRoute: Boolean(t.route) } : null;
+  return { outcome, usage: turnUsage(t, transcript) };
+}
+
+// Main-session usage of one turn: the transcript from the offset recorded at the prompt ("task" allocation). Without an
+// offset the whole transcript is read and marked "session" allocation, so it is never presented as one task's cost.
+// Sidechain lines are skipped: subagent usage is recorded per delegation from its own transcript.
+export function turnUsage(t, transcript) {
+  const file = t.tx?.path || transcript;
+  const u = readUsage(file, { from: t.tx?.offset || 0, skipSidechain: true });
+  if (!u || !u.calls) return null;
+  return { promptId: t.id, suggestionId: t.suggestion?.id || null, category: t.suggestion?.category || null, decision: t.suggestion?.decision || null,
+    outcome: t.suggestion ? outcomeOf(t) : t.agents.length ? 'delegated' : 'direct', delegations: t.agents.length,
+    allocation: t.tx ? 'task' : 'session', calls: u.calls, mainAt: u.at, main: u.groups, overhead: u.overhead, ms: Date.now() - t.at };
 }
 
 // Execution facts for one finished delegation, from Claude Code's own records (never from configuration).
@@ -84,7 +104,7 @@ export function agentFacts(input) {
   const ti = input.tool_input || {};
   const res = input.tool_response || {};
   const id = res.agentId || res.agent_id;
-  const facts = { agent: ti.subagent_type, requested: ti.model || null, models: {}, shape: null, async: res.isAsync === true || res.status === 'async_launched' || undefined };
+  const facts = { agent: ti.subagent_type, agentId: id || null, requested: ti.model || null, models: {}, shape: null, usage: null, async: res.isAsync === true || res.status === 'async_launched' || undefined };
   if (input.transcript_path && id) {
     const dir = path.join(input.transcript_path.replace(/\.jsonl$/, ''), 'subagents');
     try { const m = JSON.parse(fs.readFileSync(path.join(dir, `agent-${id}.meta.json`), 'utf8')); facts.shape = m.requestShape || null; } catch { /* older Claude Code: no meta file */ }
@@ -94,8 +114,13 @@ export function agentFacts(input) {
         try { const d = JSON.parse(line); const m = d.type === 'assistant' && d.message?.model; if (m && m !== '<synthetic>') facts.models[m] = (facts.models[m] || 0) + 1; } catch { /* partial line */ }
       }
     } catch { /* transcript not found */ }
+    // Cumulative usage of every API call the subagent made (one per message id). A background agent may still be running: partial.
+    const u = readUsage(path.join(dir, `agent-${id}.jsonl`));
+    if (u?.calls) facts.usage = { calls: u.calls, at: u.at, groups: u.groups, partial: facts.async || facts.shape === 'background' || undefined };
   }
   if (!Object.keys(facts.models).length && typeof res.resolvedModel === 'string') facts.resolvedModel = res.resolvedModel;
+  // tokens = Claude Code's totalTokens: the context size of the agent's LAST API call, not its cumulative usage (kept for
+  // compatibility; analytics use facts.usage).
   const usage = res.usage || {};
   facts.tokens = res.totalTokens ?? (usage.input_tokens != null ? (usage.input_tokens || 0) + (usage.output_tokens || 0) + (usage.cache_read_input_tokens || 0) + (usage.cache_creation_input_tokens || 0) : null);
   facts.durationMs = res.totalDurationMs ?? null;

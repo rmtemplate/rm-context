@@ -22,8 +22,16 @@ Core
   route --category <c> [--agent a] [--signals s,s] [--model m] [--session-model m] [--workflow w] [--handoff H-id] [--json] [--no-record]
                                    Adaptive model choice for one delegation (see: route categories)
   route --suggested [--session-model m]   Same, reusing the routing suggestion made for the current prompt
+  (route options also: --origin command, set by slash commands; telemetry only)
   route --escalate <R-id> --reason "…" [--handoff H-id]   Next tier for the same agent, reusing its hand-off
   route categories | stats [--json]
+  route usage [--limit N] | cost | report [--json]   Actual token usage (per session, agent, route, prompt), estimated cost, full report
+  route benchmark [list] | report [--json]           Benchmark pairs with validity status · direct vs delegated by category/complexity
+  route benchmark run --task <task.json> --main-model <id> [--order direct-first|delegated-first] --approve
+                                   Two billed headless sessions on the committed snapshot (only with --approve, after the user agrees)
+  route benchmark evaluate <B-id> --side direct|delegated --completed yes|no --criteria <passed>/<total> [--correct yes|no] [--missing n] [--false-positives n] [--rework yes|no] [--accepted yes|no]
+  route benchmark add --direct <P-id> --delegated <P-id> [--note "…"]   Declare a pair from two prompts (listed, never verified; alias: route baseline)
+  route efficiency [--category c --complexity low|medium|high --main-model id] [--json]   Historical profiles and an advisory recommendation
   handoff add <file.json> | list [--to agent]
   api list [--framework f] [--status complete|partial|unresolved] [--json]   Extracted HTTP routes with resolution status
   api frameworks [--json]          Route framework capability matrix (Supported / Partial / Detected / Planned)
@@ -182,12 +190,56 @@ async function main(argv) {
     case 'route': {
       const R = await import('./lib/routing.mjs');
       if (sub === 'categories') return out(R.formatCategories(c));
-      if (sub === 'stats') { const st = R.routeStats(c); return out(args.json ? st : R.formatStats(st)); }
-      if (sub) fail(`Unknown: rmc route ${sub}. Use: rmc route --category <c> | categories | stats`);
+      if (['stats', 'usage', 'cost', 'report', 'baseline', 'benchmark', 'efficiency'].includes(sub)) {
+        const E = await import('./lib/efficiency.mjs');
+        const B = await import('./lib/benchmark.mjs');
+        const ev = R.hookEvents(c);
+        const act = sub === 'benchmark' ? rest[0] || 'list' : null;
+        if (sub === 'baseline' || act === 'add') {
+          const b = B.addDeclared(c, ev, { direct: args.direct, delegated: args.delegated, note: args.note });
+          return out(args.json ? b : `Declared pair recorded: ${b.id} (direct ${args.direct} vs delegated ${args.delegated}). It is listed by rmc route benchmark but never counts as verified: no task fingerprint or source snapshot was recorded. For a verifiable comparison: rmc route benchmark run --task <task.json> --main-model <id> --approve`);
+        }
+        if (act === 'run') {
+          const r = B.runBenchmark(c, { task: args.task, mainModel: args['main-model'], order: args.order, approve: args.approve === true, categories: Object.keys(R.loadModelConfig(c).tasks) });
+          if (!r.approved) { out(args.json ? r : B.formatPlan(r.plan)); process.exitCode = 2; return; }
+          const p = B.assess(E.loadPricing(), r.benchmark, []);
+          return out(args.json ? r.benchmark : `Benchmark ${p.id} finished (order ${r.benchmark.order.join(' → ')}).\n${B.formatBenchmarks([p])}`);
+        }
+        if (act === 'evaluate') {
+          const e = B.evaluate(c, rest[1], { side: args.side, completed: args.completed, criteria: args.criteria, correct: args.correct, missing: args.missing, 'false-positives': args['false-positives'], rework: args.rework, accepted: args.accepted });
+          return out(args.json ? e : `Evaluation recorded: ${e.benchmarkId} ${e.side} — completed ${e.completed ? 'yes' : 'no'}, criteria ${e.criteriaPassed}/${e.criteriaTotal}. See: rmc route benchmark report`);
+        }
+        if (act && !['list', 'report'].includes(act)) fail(`Unknown: rmc route benchmark ${act}. Use: rmc route benchmark [list] | run | evaluate | add | report`);
+        if (act || sub === 'efficiency') {
+          const bd = B.benchmarkData(c);
+          if (act === 'list') return out(args.json ? bd.pairs : B.formatBenchmarks(bd.pairs));
+          if (act === 'report') return out(args.json ? bd.profs : B.formatBenchmarkReport(bd.profs));
+          const q = { category: args.category, complexity: args.complexity, mainModel: args['main-model'] };
+          const rec = q.category ? B.recommendFor(bd.profs, q) : null;
+          return out(args.json ? { recommendation: rec, profiles: bd.profs } : B.formatEfficiency(bd.profs, rec, q));
+        }
+        const e = E.routeEfficiency(c, ev);
+        const dist = E.distribution(R.readRoutes(c), ev || []);
+        if (sub === 'stats') { const st = R.routeStats(c); if (args.json) return out({ ...st, distribution: dist, efficiency: e && { ...e, tasks: undefined } }); return out([R.formatStats(st), E.formatDistribution(dist), E.formatEfficiencyBlock(e)].join('\n\n')); }
+        if (sub === 'report') {
+          const bd = B.benchmarkData(c);
+          if (args.json) return out({ distribution: dist, efficiency: e, benchmark: bd.profs });
+          return out(E.formatReport(e, { before: [E.formatDistribution(dist)], after: [B.formatBenchmarkReport(bd.profs), B.formatEfficiency(bd.profs, null)] }));
+        }
+        if (args.json) return out(e);
+        return out(sub === 'usage' ? E.formatUsage(e, { limit: Number(args.limit) || 20 }) : E.formatCost(e));
+      }
+      if (sub) fail(`Unknown: rmc route ${sub}. Use: rmc route --category <c> | categories | stats | usage | cost | report | benchmark | efficiency`);
       const r = R.route(c, { agent: args.agent, category: args.category, signals: args.signals, model: args.model,
         workflow: args.workflow, handoff: args.handoff, contextReuse: Boolean(args['context-reuse']), sessionModel: args['session-model'],
-        escalate: args.escalate, reason: typeof args.reason === 'string' ? args.reason : undefined, record: !args['no-record'], suggested: Boolean(args.suggested) });
-      return out(args.json ? r : R.formatRoute(r));
+        escalate: args.escalate, reason: typeof args.reason === 'string' ? args.reason : undefined, record: !args['no-record'], suggested: Boolean(args.suggested), origin: args.origin });
+      // Efficiency advisory from verified benchmarks (only once benchmarks exist). It never changes r.model or the route.
+      if (fs.existsSync(c.p('state', 'benchmarks.jsonl')) && r.category) {
+        const B = await import('./lib/benchmark.mjs');
+        const rec = B.recommendFor(B.benchmarkData(c).profs, { category: r.category, complexity: r.tier, mainModel: typeof args['session-model'] === 'string' ? args['session-model'] : null });
+        r.efficiency = { decision: rec.decision, text: rec.text, reason: rec.reason, validPairs: rec.profile?.validPairs || 0 };
+      }
+      return out(args.json ? r : R.formatRoute(r) + (r.efficiency ? `\nEfficiency (advisory, routing unchanged): ${r.efficiency.text}${r.efficiency.reason ? ` — ${r.efficiency.reason} (${r.efficiency.validPairs} valid benchmark pairs)` : ''}` : ''));
     }
     case 'context': {
       requireInit(c);

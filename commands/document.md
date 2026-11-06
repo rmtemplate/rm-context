@@ -19,7 +19,7 @@ Available templates (type → owning agent):
 2. Pick the template type from the request.
    - If the request is ambiguous, ask the user, offering the two or three closest types.
    - If no type fits, say so. Do not force a template.
-3. Get the owning agent from `rmc doc types --json`, then route it with `rmc route --agent <owner> --category <the type if `rmc route categories` lists it, else document> --session-model <your model id> [--signals …]`. Show the user its `Notice:` line exactly as printed and its routing block.
+3. Get the owning agent from `rmc doc types --json`, then route it with `rmc route --origin command --agent <owner> --category <the type if `rmc route categories` lists it, else document> --session-model <your model id> [--signals …]`. Show the user its `Notice:` line exactly as printed and its routing block.
 4. Check `rmc doc list` for an existing document of that type and scope. Prefer revising it over creating a duplicate.
 5. Delegate to the owner agent. It runs `rmc doc new <type> --title "…" --author <owner>`, fills every section, records graph links and passes `rmc doc validate`.
 6. Report: id, path, validation status, assumptions and open questions. Offer export (`rmc doc export <id> --format html|pdf|docx`). Approval only happens on explicit user instruction.

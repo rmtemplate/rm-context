@@ -1,0 +1,11 @@
+{
+  "description": "Controlled routing benchmark settings (rmc route benchmark). A run starts two billed headless Claude Code sessions and only runs with --approve, given after the user explicitly agrees.",
+  "minPairs": 3,
+  "recommendedPairs": 5,
+  "timeoutSeconds": 900,
+  "allowedTools": ["Read", "Grep", "Glob", "Bash(node:*)", "Agent"],
+  "modes": {
+    "direct": "Do this task yourself in the main session. Do not delegate to any agent.",
+    "delegated": "Delegate this task to one RM Context agent, in the foreground: first run {route}, show its Notice line, then call the Agent tool with the agent and model it prints. Do not do the task yourself beyond checking the agent's result."
+  }
+}

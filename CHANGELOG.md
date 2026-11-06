@@ -21,6 +21,25 @@
 - **`rmc route stats`** adds suggestions generated / followed / ignored (direct response) / different agent / outcome unknown, delegations through `rmc route` vs direct, actual model verified vs unavailable, foreground / background detected / mode unknown, and background or concurrent calls rejected. Events are linked by session, prompt and suggestion ids; a suggestion counts as followed only when the suggested agent ran for that prompt. No prompt text is stored.
 - **Delegation notices.** `rmc route --session-model <model>` prints `Notice: Perpindahan ke model <Model>, karena bertugas sebagai <Role>.`, or a no-switch notice when the subagent uses the main session's model. `routing.noticeLanguage`: `id` (default) or `en`. Commands and the team-workflows skill show it before delegating and run roles one at a time.
 
+- **Routing cost & token efficiency** (`scripts/lib/usage.mjs`, `scripts/lib/efficiency.mjs`, `config/pricing.json`).
+  - Actual token usage is read from Claude Code transcripts: each API call is counted once by message id; sidechain lines are skipped for the main session.
+  - Main-session usage is recorded per prompt (`turn-usage` event: the transcript slice from the prompt hook's offset to Stop), with delegation-issuing calls reported as overhead.
+  - Each delegation records its subagent's cumulative usage, `agentId` and `delegationId`.
+  - Pricing registry: exact model ids, 5m/1h cache-write and cache-read rates, Haiku 5.5 long-prompt, fast-mode and US-geo rates, effective date, source and pricing version. Historical usage is priced by date.
+  - New commands `rmc route usage | cost | report` and `rmc route baseline --direct <P-id> --delegated <P-id>` (controlled comparison).
+  - `rmc route stats` adds a Routing efficiency block.
+  - Direct vs delegated savings are labelled Controlled, Observational estimate or Unavailable.
+  - The delegation event's `tokens` field is unchanged, for compatibility. It is Claude Code's last-call context size, so analytics do not use it.
+- **Routing benchmark & efficiency intelligence** (`scripts/lib/benchmark.mjs`, `config/benchmark.json`).
+  - Routes record `origin` (`command`, `workflow`, `suggested`, `manual`; older records show `unknown`) and the user-requested model. Slash commands pass `--origin command`.
+  - `rmc route stats` adds a routing distribution: routes by origin, agent, tier and model; suggestions, routes, delegations and direct responses counted separately, once per id; requested vs actual subagent model, with `unverified` when the transcript could not be read; delegation status and foreground/background.
+  - Delegation events add `status` (`completed`, `started`, `failed`); failed `rmc:*` agent calls are logged. Analytics deduplicate events by id.
+  - `rmc route benchmark run --task <file> --main-model <id>`: controlled pairs. It prints a plan and runs only with `--approve`, then starts two headless `claude -p` sessions in fresh copies of `git HEAD`, in alternating order. Usage is checked against Claude Code's totals. Only the task fingerprint, the commit and metrics are stored.
+  - `rmc route benchmark evaluate`: manual quality evaluation (completion, criteria, correctness, missing findings, false positives, rework, acceptance); unequal quality invalidates the pair.
+  - `rmc route benchmark [report]` and `rmc route efficiency`: pair validity with reasons, profiles per category / complexity / main model / subagent model, VERIFIED (≥ 3 valid pairs) / INSUFFICIENT DATA / NOT COMPARABLE. Token and cost savings are reported separately.
+  - `rmc route` prints an advisory efficiency line once benchmarks exist; the routed model never changes.
+  - **Changed:** `rmc route baseline` now records a *declared* pair, shown but never verified; older `baselines.jsonl` entries are read the same way. The observational estimate stays in `rmc route report` and is never used for recommendations. The savings line moved from `rmc route stats` to `rmc route report` / `rmc route benchmark report`.
+
 ### Fixed (routing and retrieval)
 - Long prompts got no retrieved context: relevance was diluted by every known word in the prompt. It is now normalised over the six most discriminative terms, and repeated words weigh more (1 + ln tf). `minimumRelevance` is unchanged, and short prompts score as before. Fixtures: `tests/fixtures/prompts/retrieval.json`.
 - Tests that ran hooks without a `cwd` wrote telemetry into this repository's own `.rmcontext/state`. Hooks in tests now run from an isolated temp directory, `RMC_SESSION_ID` is cleared, and each hook test file asserts that the repository telemetry is unchanged.
