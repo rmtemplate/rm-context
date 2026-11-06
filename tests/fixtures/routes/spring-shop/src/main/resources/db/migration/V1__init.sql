@@ -1,0 +1,4 @@
+CREATE TABLE app_users (
+  id BIGINT PRIMARY KEY,
+  email VARCHAR(200) NOT NULL
+);

@@ -1,0 +1,27 @@
+{
+  "_about": "Retrieval fixtures for the node-app project (tests/fixtures/node-app). expect: the node name that must be a scored hit, or null for no scored hit.",
+  "short": {
+    "prompt": "Refactor the chargeOrder billing logic",
+    "expect": "chargeOrder"
+  },
+  "longRelevant": {
+    "prompt": "We are planning a larger review of the project. Our team wants a careful write up covering the overall approach, the decisions we took last quarter, the deployment story with docker compose and nginx, the CI pipeline, the health checks, the jest test setup, the express middleware, the postgres schema and the index files. Please keep the report short, avoid speculation, cite sources, keep compatibility, list risks and open questions, and suggest next steps for the team and stakeholders. The main question: how does chargeOrder in the billing service compute the order total and what calls it?",
+    "expect": "chargeOrder"
+  },
+  "longRepeatedTopic": {
+    "prompt": "We are planning a larger review of the project. Our team wants a careful write up covering the overall approach, the decisions we took last quarter, the deployment story with docker compose and nginx, the CI pipeline, the health checks, the jest test setup, the express middleware, the postgres schema and the index files. Please keep the report short, avoid speculation, cite sources, keep compatibility, list risks and open questions, and suggest next steps for the team and stakeholders. Focus on billing: the billing code, billing totals, billing failures and how billing reaches the order.",
+    "expect": "chargeOrder"
+  },
+  "longIrrelevant": {
+    "prompt": "We are planning a larger review of the project. Our team wants a careful write up covering the overall approach, the decisions we took last quarter, the deployment story with docker compose and nginx, the CI pipeline, the health checks, the jest test setup, the express middleware, the postgres schema and the index files. Please keep the report short, avoid speculation, cite sources, keep compatibility, list risks and open questions, and suggest next steps for the team and stakeholders. Also summarise the weather trends, coffee preferences, travel budget, holiday calendar and office seating plan for next year.",
+    "expect": null
+  },
+  "none": {
+    "prompt": "Tell me a story about dragons, castles and a brave knight who travels far away to find treasure in the mountains",
+    "expect": null
+  },
+  "identifiers": {
+    "prompt": "What does POST /users do and which table does createUser in src/routes/users.js write to?",
+    "expect": "POST /users"
+  }
+}

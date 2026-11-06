@@ -1,0 +1,11 @@
+# Default profile
+server:
+  servlet:
+    context-path: /shop
+api:
+  base: /api   # trailing comment
+  list:
+    - /ignored
+app:
+  paths:
+    admin: /admin

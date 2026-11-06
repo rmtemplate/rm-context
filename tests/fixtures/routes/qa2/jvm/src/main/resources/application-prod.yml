@@ -1,0 +1,4 @@
+catalog:
+  base: /prod-catalog
+ops:
+  base: /ops

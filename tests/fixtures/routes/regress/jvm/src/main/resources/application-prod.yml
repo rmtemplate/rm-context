@@ -1,0 +1,6 @@
+server:
+  servlet:
+    context-path: /prod-app
+api:
+  base: /v1
+  only-prod: /prod-only

@@ -1,0 +1,10 @@
+server:
+  port: 8080
+  servlet:
+    context-path: /shop
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost/shop
+    password: change-me
+api:
+  base-path: /api
