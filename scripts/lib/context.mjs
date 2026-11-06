@@ -4,12 +4,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { ctx, readJson, writeJson, now, toPosix } from './util.mjs';
+import { loadModelConfig } from './routing.mjs';
 import { findSecrets } from './ignore.mjs';
 import * as G from './graph.mjs';
 
 export const AUTO_DEFAULTS = {
   enabled: true, sessionStart: true, promptRetrieval: true, incrementalRefresh: true,
-  maxContextTokens: 1200, sessionContextTokens: 250, maxResults: 8, minimumRelevance: 0.45, verifySource: true,
+  maxContextTokens: 1200, sessionContextTokens: 330, maxResults: 8, minimumRelevance: 0.45, verifySource: true,
 };
 
 // Walk up from cwd to the nearest initialized project.
@@ -48,11 +49,19 @@ export function sessionSummary(c, cli) {
     `[RM CONTEXT] Project intelligence for "${m.project?.name || path.basename(c.root)}" is in .rmcontext/${stack ? ` (stack: ${stack})` : ''}.`,
     `Last scan ${String(m.scan?.timestamp || 'unknown').slice(0, 16).replace('T', ' ')} UTC (${m.scan?.mode || '?'})${g.nodes ? `, graph ${g.nodes} nodes / ${g.edges} edges` : ''}${lr ? `; last auto-refresh ${lr.at.slice(0, 16).replace('T', ' ')}` : ''}${pending ? '; changes pending refresh' : ''}.`,
     conf.promptRetrieval ? 'Relevant knowledge is added to your prompts automatically when it matches; it is derived from source, so verify the cited files before relying on it.' : '',
-    `More: node "${cli}" find <terms> · impact <file|id> · status. Read .rmcontext/INDEX.md only if broader orientation is needed.`,
+    `RM Context CLI (rmc): node "${cli}" — find <terms> · impact <file|id> · status. Read .rmcontext/INDEX.md only if broader orientation is needed.`,
   ].filter(Boolean);
-  let out = lines.join('\n');
-  while (tokens(out) > conf.sessionContextTokens && lines.length > 1) { lines.splice(lines.length - 2, 1); out = lines.join('\n'); }
+  // Delegation policy (routing.autoSuggest): suggestions are advice; delegation stays Claude's decision.
+  const policy = suggestionsOn(c) ? 'Routing: "RM Context suggests <agent> (<model>)" lines are advice. Delegate only investigation or cross-module work, never simple lookups: rmc route --suggested --session-model <your model id>, show its Notice, one foreground agent at a time. Answered directly? Claim no delegation.' : '';
+  let out = [...lines, policy].filter(Boolean).join('\n');
+  // Over budget: drop the optional middle lines first, keeping the header, the CLI line and the policy.
+  while (tokens(out) > conf.sessionContextTokens && lines.length > 2) { lines.splice(lines.length - 2, 1); out = [...lines, policy].filter(Boolean).join('\n'); }
   return out;
+}
+
+function suggestionsOn(c) {
+  const r = loadModelConfig(c).routing;
+  return r.enabled !== false && r.autoSuggest !== false;
 }
 
 // ---------- prompt retrieval ----------
@@ -63,7 +72,7 @@ implement implementing fix fixing update change changes explain show tell find g
 project feature features let lets help write generate run check look see
 yang dan di ke dari untuk pada dengan ini itu ada adalah akan bisa dapat jadi juga atau tapi tetapi karena agar supaya saya aku kamu kita kami anda tolong mohon
 buat buatkan bikin tambah tambahkan tambahin ubah ubahkan perbaiki benerin jelaskan tunjukkan cari carikan gimana bagaimana apa apakah mana dimana kenapa mengapa
-fitur fungsi kode file berkas sudah belum masih lagi saja aja dong deh nya sih kok semua setiap baru yg dgn utk tdk ga gak nggak tidak bukan seperti cara`.split(/\s+/));
+fitur fungsi kode file berkas sudah belum masih lagi saja aja dong deh nya sih kok semua setiap baru yg dgn utk tdk ga gak nggak tidak bukan seperti cara langsung`.split(/\s+/));
 // Small Indonesian → English vocabulary so local-language prompts can reach English identifiers.
 const SYN = { pengguna: 'user', pelanggan: 'customer', pesanan: 'order', pembayaran: 'payment', bayar: 'payment', tagihan: 'invoice', faktur: 'invoice',
   harga: 'price', produk: 'product', barang: 'product', keranjang: 'cart', masuk: 'login', keluar: 'logout', daftar: 'register', pendaftaran: 'register',
@@ -87,7 +96,10 @@ export function queryTerms(prompt) {
   const raw = split(prompt).filter((t) => t.length >= 3 && !STOP.has(t) && !/^\d+$/.test(t));
   const terms = new Map();
   const add = (t, w) => terms.set(t, Math.max(terms.get(t) || 0, w));
-  for (const t of raw) { add(t, 1); if (SYN[t]) add(SYN[t], 0.9); }
+  // Term frequency: a word the prompt repeats is its topic (1 + ln tf); a word used once keeps weight 1, so short prompts are unchanged.
+  const tf = new Map();
+  for (const t of raw) tf.set(t, (tf.get(t) || 0) + 1);
+  for (const [t, n] of tf) { const w = 1 + Math.log(n); add(t, w); if (SYN[t]) add(SYN[t], 0.9 * w); }
   for (const [t, w] of [...terms]) for (const r of CONCEPTS[t] || []) add(r, 0.7 * w);
   const words = new Set(split(prompt));
   return { terms, docTypes: DOC_WORDS.filter((d) => words.has(d)), infra: [...words].some((w) => INFRA_WORDS.has(w)) };
@@ -102,6 +114,10 @@ function nodeTokens(n) {
 }
 
 // Score every node: idf-weighted share of the query's known terms it contains. Unknown terms (new concepts) do not dilute the score.
+// The share is taken over the TOP_TERMS most discriminative known terms only, so a long prompt (many known words) is not
+// diluted: a node must still match several of the prompt's strongest terms to pass minimumRelevance. Short prompts
+// (≤ TOP_TERMS known terms) score exactly as before.
+export const TOP_TERMS = 6;
 export function rankNodes(g, terms) {
   const toks = g.nodes.map(nodeTokens);
   const N = g.nodes.length || 1;
@@ -114,8 +130,8 @@ export function rankNodes(g, terms) {
     if (!df || df / N > 0.25) continue; // unknown here, or too common to discriminate
     known.push({ q, w: w * Math.log(1 + N / df) });
   }
-  const total = known.reduce((a, k) => a + k.w, 0);
-  if (!total) return { known: [], ranked: [] };
+  const total = [...known].sort((a, b) => b.w - a.w).slice(0, TOP_TERMS).reduce((a, k) => a + k.w, 0);
+  if (!total) return { known: [], ranked: [], total: 0 };
   const ranked = [];
   g.nodes.forEach((n, i) => {
     const pr = PRIORITY[n.type] ?? 0.9;
@@ -128,7 +144,7 @@ export function rankNodes(g, terms) {
     if (hit) ranked.push({ n, score: Math.min(1, (hit / total) * pr) });
   });
   ranked.sort((a, b) => b.score - a.score || (a.n.name.length - b.n.name.length));
-  return { known, ranked };
+  return { known, ranked, total };
 }
 
 // How a neighbour relates to the hit: hit --type--> neighbour reads PASSIVE; neighbour --type--> hit reads ACTIVE.
@@ -162,8 +178,7 @@ export function retrieve(c, prompt, override = {}) {
   const { terms, docTypes, infra } = queryTerms(prompt);
   const g = G.loadGraph(c);
   const ix = G.index(g);
-  const { known, ranked } = rankNodes(g, terms);
-  const total = known.reduce((a, k) => a + k.w, 0);
+  const { known, ranked, total } = rankNodes(g, terms);
   if (infra) for (const r of ranked) if (G.layerOf(r.n.type) === 'infrastructure') r.score = Math.min(1, r.score * 1.3);
   ranked.sort((a, b) => b.score - a.score);
   const hits = ranked.filter((r) => r.score >= cfg.minimumRelevance).slice(0, cfg.maxResults);

@@ -9,26 +9,74 @@ import path from 'node:path';
 
 export const isRmcAgent = (t) => /^(rmc|rm-context):/.test(String(t || ''));
 const LOCK_TTL_MS = 2 * 60 * 60 * 1000;
-const lockFile = (sid) => path.join(os.tmpdir(), `rmc-delegation-${String(sid || 'default').replace(/[^\w-]/g, '')}.json`);
+const safe = (sid) => String(sid || 'default').replace(/[^\w-]/g, '');
+const lockFile = (sid) => path.join(os.tmpdir(), `rmc-delegation-${safe(sid)}.json`);
 const readLock = (sid) => { try { return JSON.parse(fs.readFileSync(lockFile(sid), 'utf8')); } catch { return null; } };
 export const clearLock = (sid) => { try { fs.rmSync(lockFile(sid), { force: true }); } catch { /* ignore */ } };
 
-// Returns a deny reason, or null to allow. conf.background: 'deny' (default) | 'allow'.
+// Returns { kind: 'background' | 'concurrent', reason } to deny, or null to allow. conf.background: 'deny' (default) | 'allow'.
 export function preAgent(input, conf = {}) {
   const ti = input.tool_input || {};
   if (!isRmcAgent(ti.subagent_type)) return null;
   const allowBg = conf.background === 'allow' || process.env.RMC_ALLOW_BACKGROUND === '1';
   if (ti.run_in_background && !allowBg) {
-    return 'RM Context delegates in the foreground. Call the Agent tool again without run_in_background and wait for its result. '
-      + '(Only if the user explicitly asked for background or parallel work: set "delegation": { "background": "allow" } in .rmcontext/config.json.)';
+    return { kind: 'background', reason: 'RM Context delegates in the foreground. Call the Agent tool again without run_in_background and wait for its result. '
+      + '(Only if the user explicitly asked for background or parallel work: set "delegation": { "background": "allow" } in .rmcontext/config.json.)' };
   }
   if (allowBg) return null; // background/parallel explicitly allowed: no one-at-a-time lock
   const lock = readLock(input.session_id);
   if (lock && lock.toolUseId !== input.tool_use_id && Date.now() - lock.at < LOCK_TTL_MS) {
-    return `RM Context runs one agent at a time: ${lock.agent} is still running. Wait for its result, then delegate the next role.`;
+    return { kind: 'concurrent', reason: `RM Context runs one agent at a time: ${lock.agent} is still running. Wait for its result, then delegate the next role.` };
   }
   try { fs.writeFileSync(lockFile(input.session_id), JSON.stringify({ toolUseId: input.tool_use_id, agent: ti.subagent_type, at: Date.now() })); } catch { /* ignore */ }
   return null;
+}
+
+// ---------- per-session turn state (tmp file, metadata only, never prompt text) ----------
+// One "turn" per submitted prompt: its routing suggestion, the rmc route taken for it and the RM Context agents that ran.
+// rmc route reuses the suggestion's classification (same session, same project, same prompt, not expired), and stats can
+// tell a followed suggestion from an ignored one. A new prompt, Stop or expiry ends the turn, so an older prompt's
+// classification is never reused.
+export const TURN_TTL_MS = 30 * 60 * 1000;
+const sessionFile = (sid) => path.join(os.tmpdir(), `rmc-session-${safe(sid)}.json`);
+export const readSession = (sid) => { try { return JSON.parse(fs.readFileSync(sessionFile(sid), 'utf8')); } catch { return {}; } };
+export const writeSession = (sid, s) => { try { fs.writeFileSync(sessionFile(sid), JSON.stringify(s)); } catch { /* ignore */ } };
+export const clearSession = (sid) => { try { fs.rmSync(sessionFile(sid), { force: true }); } catch { /* ignore */ } };
+
+export function currentTurn(sid, root) {
+  if (!sid) return null;
+  const t = readSession(sid).turn;
+  return t && t.root === root && Date.now() - t.at < TURN_TTL_MS ? t : null;
+}
+
+export function startTurn(sid, root, suggestion) {
+  if (!sid) return null;
+  const s = readSession(sid);
+  s.turn = { id: `P-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`, at: Date.now(), root, suggestion: suggestion || null, route: null, agents: [] };
+  writeSession(sid, s);
+  return s.turn;
+}
+
+export function updateTurn(sid, root, fn) {
+  const s = readSession(sid);
+  if (!s.turn || s.turn.root !== root) return null;
+  fn(s.turn);
+  writeSession(sid, s);
+  return s.turn;
+}
+
+// Ends the current turn. Returns the outcome of its suggestion (null if it had none):
+// followed = the suggested agent ran · other-agent = a different RM Context agent ran · direct = no RM Context agent ran.
+export function endTurn(sid, root) {
+  if (!sid) return null;
+  const s = readSession(sid);
+  const t = s.turn;
+  if (!t) return null;
+  delete s.turn;
+  writeSession(sid, s);
+  if (t.root !== root || !t.suggestion) return null;
+  const outcome = t.agents.includes(t.suggestion.agent) ? 'followed' : t.agents.length ? 'other-agent' : 'direct';
+  return { suggestionId: t.suggestion.id, promptId: t.id, agent: t.suggestion.agent, outcome, viaRoute: Boolean(t.route) };
 }
 
 // Execution facts for one finished delegation, from Claude Code's own records (never from configuration).
@@ -61,8 +109,8 @@ export function postAgentText(f) {
   const parts = [`[RM CONTEXT] Delegation check for ${role}:`];
   parts.push(bg ? 'it ran in the BACKGROUND (not the foreground mode RM Context requires); say so to the user.' : f.shape ? `it ran in the ${f.shape === 'sync' ? 'foreground' : f.shape} mode (Claude Code requestShape).` : 'its execution mode was not recorded.');
   if (actual.length) parts.push(`Actual model (subagent transcript): ${actual.join(', ')}; requested: ${f.requested || 'none (inherited)'}.`);
-  else if (bg) parts.push('The actual model is not known yet because the agent is still running.');
-  else parts.push(`The actual model could not be verified from execution metadata${f.resolvedModel ? ` (Claude Code resolved "${f.resolvedModel}" before launch)` : ''}; do not tell the user the model switch succeeded.`);
+  else if (bg) parts.push('Status: Delegation started; actual model not yet verified (the agent is still running).');
+  else parts.push(`The actual model could not be verified from execution metadata${f.resolvedModel ? ` (Claude Code resolved "${f.resolvedModel}" before launch)` : ''}; do not tell the user the model switch succeeded. Status: Delegation started; actual model not yet verified.`);
   if (actual.length && f.requested && !actual.some((m) => m.includes(f.requested))) parts.push(`The actual model differs from the requested "${f.requested}": tell the user.`);
   return parts.join(' ');
 }

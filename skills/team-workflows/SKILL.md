@@ -113,6 +113,7 @@ End every task with a compact report:
 ## 6. Orchestration (main session)
 
 - **Delegate only when needed.** One role per step; never spawn every agent "to be thorough". Answer simple questions yourself or with `quick-qa`.
+- **Suggestions on ordinary prompts are advice.** A prompt may carry `RM Context suggests <Role> (<Model>) …`, from a deterministic classifier. Follow it only when the work needs investigation or cross-module analysis: run `rmc route --suggested --session-model <your model id>`, which reuses that prompt's classification, then delegate as below. Answer simple lookups yourself. If you answer directly, do not show a notice or claim a delegation.
 - **Choose the agent and the model separately.** The agent follows the work (an FSD goes to the BA). The model follows the difficulty of this particular task. See *Model routing* below.
 - **Pass context, not instructions to rediscover it.** Give the agent the request, the `rmc` command line, relevant ids and paths, and the upstream hand-off ids.
 - **Foreground, one agent at a time.** Call the Agent tool without `run_in_background` and wait for its result before the next step. Run roles one after another, even when steps are independent; run in parallel only when the user explicitly asks. The plugin's hooks deny background or concurrent RM Context agents unless `delegation.background` is `"allow"` in `.rmcontext/config.json`.

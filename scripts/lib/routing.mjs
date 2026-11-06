@@ -2,8 +2,8 @@
 // Agent selection and model selection are separate decisions; the main session model is never touched.
 import fs from 'node:fs';
 import path from 'node:path';
-import { PLUGIN_ROOT, readJson, fail, now } from './util.mjs';
-import { readHandoffs } from './project.mjs';
+import { PLUGIN_ROOT, readJson, fail, now, readHandoffs } from './util.mjs';
+import { currentTurn, updateTurn } from './delegation.mjs';
 
 export const TIERS = ['low', 'medium', 'high'];
 // Raise to high: any of these. Raise to at least medium: ambiguous, code, 2 modules. Lower to low: trivial/retrieval with no raise signal.
@@ -55,11 +55,20 @@ export function classify(baseTier, sig) {
   return { tier: baseTier, why: mid };
 }
 
-// opts: { agent, category, signals, model, workflow, handoff, contextReuse, escalate, reason, record }
+// opts: { agent, category, signals, model, sessionModel, workflow, handoff, contextReuse, escalate, reason, record, suggested }
 export function route(c, opts = {}) {
   const cfg = loadModelConfig(c);
   const notes = [];
   let prev = null;
+  // The current prompt's turn (RMC_SESSION_ID is exported to Bash by the SessionStart hook). Read only for real routes.
+  const sid = process.env.RMC_SESSION_ID;
+  const turn = sid && (opts.record !== false || opts.suggested) ? currentTurn(sid, c.root) : null;
+  if (opts.suggested) {
+    // Reuse the classification the prompt hook already made for this session and prompt; never an older prompt's.
+    const s = turn?.suggestion || fail('No current RM Context suggestion for this session and prompt (suggestions expire with their prompt and are never reused across sessions). Classify explicitly: rmc route --category <c> [--signals …]');
+    opts.category = opts.category || s.category;
+    opts.signals = opts.signals || s.signals.join(',');
+  }
   if (opts.escalate) {
     const all = readRoutes(c);
     prev = all.find((r) => r.id === opts.escalate) || fail(`Unknown route ${opts.escalate}. See: rmc route stats`);
@@ -119,13 +128,103 @@ export function route(c, opts = {}) {
   const fam = (m) => /(opus|sonnet|haiku)/.exec(String(m || '').toLowerCase())?.[1] || null;
   r.sessionModel = fam(opts.sessionModel);
   r.notice = notice(roleName(agent), r.model, r.sessionModel, cfg.routing.noticeLanguage);
+  r.promptId = turn?.id || null;
+  r.suggestionId = turn?.suggestion?.id || null;
+  r.followsSuggestion = turn?.suggestion ? turn.suggestion.agent === agent : null;
   if (opts.record !== false && fs.existsSync(c.manifest)) {
     fs.mkdirSync(path.dirname(metricsFile(c)), { recursive: true });
     // Metadata only: no prompts, no source code.
     const { notes: _n, notice: _t, ...meta } = r;
     fs.appendFileSync(metricsFile(c), JSON.stringify(meta) + '\n');
+    if (turn) updateTurn(sid, c.root, (t) => { t.route = { id: r.id, agent }; });
   }
   return { ...r, handoffDetail: handoff };
+}
+
+// ---------- automatic suggestion for ordinary prompts ----------
+// Deterministic keyword rules (English + Indonesian) turn a prompt into a task category and complexity signals; the
+// existing route() then picks agent and model with the usual precedence. No model calls, no scanning, prompt never stored.
+// Rule order breaks ties; otherwise the intent that appears first in the prompt wins (usually its main verb). The generic
+// investigation rule (last) applies only when no specific intent matched.
+const RX = {
+  architecture: /\barchitect(?:ure|ural)?\b|arsitektur|system design|desain sistem/i,
+  security: /\bsecurity\b|vulnerab|keamanan|\b(?:xss|csrf|sql injection|privilege escalation)\b/i,
+  debugging: /\bdebug|root cause|akar masalah|stack ?trace|race condition|memory leak|deadlock|intermittent|\b(?:why|kenapa|mengapa)\b.{0,80}\b(?:fails?|failing|errors?|crash\w*|broken|gagal|rusak|lambat|slow)\b/i,
+};
+const RULES = [
+  ['architecture', RX.architecture],
+  ['security', RX.security],
+  ['refactor', /\brefactor|restructur|\bre-?architect|rewrite the\b/i],
+  ['migration', /\bmigrat(?:e|ion)|\bmigrasi/i],
+  ['debugging', RX.debugging],
+  ['impact', /\bimpact\b|\bdampak|blast radius|what (?:would|will) break|terpengaruh/i],
+  ['code-review', /\breview\b|\baudit\b|code quality|kualitas kode|periksa implementasi/i],
+  ['infra-design', /infra(?:structure)? (?:architecture|design)|arsitektur infra/i],
+  ['ci-cd', /\bdocker|ci\/cd|\bpipeline\b|\bdeploy|kubernetes|\bk8s\b|\bhelm\b|\bnginx\b/i],
+  ['brd', /\bbrd\b/i], ['fsd', /\bfsd\b/i], ['sipoc', /\bsipoc\b/i], ['srs', /\bsrs\b/i], ['erd', /\berd\b/i], ['uml', /\buml\b|sequence diagram/i],
+  ['adr', /\badr\b|decision record/i], ['rtm', /\brtm\b|traceability/i], ['gantt', /\bgantt\b/i], ['wbs', /\bwbs\b/i], ['roadmap', /\broadmap\b/i],
+  ['business-analysis', /business (?:flow|process|rule|logic)|alur bisnis|proses bisnis|aturan bisnis|logika bisnis|\brequirements?\b|kebutuhan bisnis|user stor/i],
+  ['doc-update', /\bdocumentation\b|\bdokumentasi\b|^document (?:the|this|our)\b|^dokumentasikan\b/i],
+  ['system-analysis', /\bapis?\b|\bendpoints?\b|\bdatabase\b|\bschema\b|\btables?\b|\btabel\b|\bintegrat|\bintegrasi|data model|data flow|alur data/i],
+  ['qa', /test cases?|test plan|acceptance criteria|\bverif(?:y|ikasi)\b|regression/i],
+  ['plan', /\bsprint\b|\btimeline\b|\bmilestone|project plan|rencana proyek/i],
+  ['small-feature', /\bimplement|add (?:a |the )?feature|new feature|\btambah(?:kan)? fitur|fitur baru|\bbuild (?:a|the)\b/i],
+  ['bug-fix', /\bbug\b|\bfix\b|\bperbaiki|\bbenerin/i],
+  ['search', /\binvestigat|\binvestigasi|\btelusuri|\btrace (?:the|how)\b|\bhow does\b.{0,60}\b(?:work|flow)|bagaimana\b.{0,60}\b(?:bekerja|berjalan|alur|mengalir)|\bwhere\b.{0,60}\b(?:used|called)\b|(?:dipakai|digunakan|dipanggil) di ?mana|\banaly[sz]|\banalis[ia]s?\b|\banalisa\b|\balur\b|\bflow\b/i],
+];
+const SIGNAL_RX = {
+  'cross-module': /cross[- ](?:module|service|cutting)|lintas (?:modul|service|layanan|domain)|\bacross\b.{0,40}\b(?:modules|services|domains|layers|system|codebase)\b|\b(?:between|antara)\b.{0,40}\b(?:modules|services|modul|layanan)\b|\b(?:multiple|several|many|beberapa|banyak) (?:modules|services|domains|modul|service|layanan|domain)\b|microservices|end[- ]to[- ]end|seluruh (?:sistem|modul|codebase)/i,
+  architecture: RX.architecture, security: RX.security, debugging: RX.debugging,
+  irreversible: /\b(?:drop|truncate) (?:table|column|database)|data loss|production data|data produksi|irreversible/i,
+  code: /\bimplement|\brefactor|\bmodify\b|\bfix\b|\bperbaiki|ubah kode|tulis kode/i,
+};
+const GREETING = /^(?:hi|hello|hey|halo|hai|thanks|thank you|terima kasih|makasih|ok(?:ay)?|sip|good (?:morning|afternoon|evening|night)|selamat (?:pagi|siang|sore|malam))\b/i;
+const GENERAL = /^(?:what (?:is|are)|apa (?:itu|arti|bedanya)|define|definisi|explain what|jelaskan apa itu)\b/i;
+const SIMPLE_LOOKUP = /^(?:where (?:is|are)|where's|di ?mana(?:kah)?|which file|file mana|show me|tampilkan|find|cari(?:kan)?|open|buka)\b/i;
+const PROJECT_REF = /\b(?:this|our|the) (?:project|repo|repository|codebase|system|app|application|service|module)s?\b|\b(?:project|proyek|repo|codebase|sistem|aplikasi|modul) (?:ini|kita)\b|\bdi (?:project|proyek|repo|codebase|sini)\b|\b(?:modules?|modul|controllers?|services?|repositor(?:y|ies)|endpoints?|handlers?|migrations?|middleware)\b/i;
+const IDENT = /\b[a-z]+[A-Z]\w*|\b[A-Z][a-z]+[A-Z]\w*|\b[a-z]+_[a-z_]+\b|\b[\w-]+\/[\w./-]+|\.(?:m?[jt]sx?|php|py|cs|java|kt|go|rb|rs|sql|vue|json|ya?ml)\b/;
+
+// Returns { decision: 'direct' | 'suggest' | 'complex', category, signals, confidence, why }. hits = retrieval hits for the prompt.
+export function classifyPrompt(prompt, { hits = 0, projectName } = {}) {
+  const p = String(prompt || '').trim();
+  const words = p.split(/\s+/).filter(Boolean).length;
+  const direct = (why) => ({ decision: 'direct', category: null, signals: [], confidence: 0, why });
+  if (!p || p.startsWith('/') || words < 4) return direct('too short or a command');
+  if (GREETING.test(p) && words < 12) return direct('greeting or small talk');
+  const name = String(projectName || '').trim().toLowerCase();
+  const ref = PROJECT_REF.test(p) || IDENT.test(p) || (name.length >= 3 && p.toLowerCase().includes(name));
+  if (GENERAL.test(p) && !ref) return direct('general knowledge question');
+  let best = null;
+  const pick = (rules) => { for (const [category, rx] of rules) { const m = rx.exec(p); if (m && (!best || m.index < best.index)) best = { category, index: m.index }; } };
+  pick(RULES.slice(0, -1));
+  if (!best) pick(RULES.slice(-1));
+  if (!best) return direct('no project-task intent');
+  const signals = Object.keys(SIGNAL_RX).filter((k) => SIGNAL_RX[k].test(p));
+  let { category } = best;
+  if (SIMPLE_LOOKUP.test(p) && words <= 12 && category === 'search' && !signals.length) return direct('simple lookup');
+  // An investigation or feature that spans modules or the architecture is the complex variant of that task.
+  if (['search', 'system-analysis'].includes(category) && (signals.includes('cross-module') || signals.includes('architecture'))) category = 'architecture';
+  if (category === 'small-feature' && (signals.includes('cross-module') || signals.includes('architecture'))) category = 'complex-feature';
+  if (category === 'search' && signals.includes('debugging')) category = 'debugging';
+  const confidence = Math.round((0.5 + (ref ? 0.3 : 0) + Math.min(0.2, 0.1 * hits)) * 100) / 100;
+  return { decision: 'suggest', category, signals: signals.filter((s) => s !== category), confidence, why: `intent "${best.category}"${ref ? ', project reference' : ''}${hits ? `, ${hits} knowledge hit(s)` : ''}` };
+}
+
+// The short context line injected for one prompt, or null. Never forces a delegation; Claude may answer directly.
+export function suggestForPrompt(c, prompt, { sessionModel, hits = 0 } = {}) {
+  const cfg = loadModelConfig(c);
+  if (!cfg.routing.enabled || cfg.routing.autoSuggest === false) return null;
+  const k = classifyPrompt(prompt, { hits, projectName: readJson(c.manifest, {}).project?.name });
+  if (k.decision === 'direct' || k.confidence < (cfg.routing.suggestMinConfidence ?? 0.7)) return null;
+  let r;
+  try { r = route(c, { category: k.category, signals: k.signals.join(','), sessionModel, record: false }); } catch { return null; }
+  const decision = r.tier === 'high' ? 'complex' : 'suggest';
+  const fam = /(opus|sonnet|haiku)/.exec(String(sessionModel || '').toLowerCase())?.[1];
+  const model = r.model === 'inherit' ? 'main session model' : cap(r.model) + (fam === r.model ? ', same as the main session' : '');
+  const label = (cfg.tasks[k.category]?.label || k.category).replace(/^./, (x) => x.toLowerCase());
+  const text = `RM Context suggests ${roleName(r.agent)} (${model}) for this ${label}. To delegate: rmc route --suggested --session-model <id>, show its Notice, run it in the foreground. Simple? Answer directly.`;
+  return { id: `S-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`, decision, category: k.category, signals: k.signals,
+    confidence: k.confidence, agent: r.agent, model: r.model, tier: r.tier, text };
 }
 
 export const roleName = (agent) => agent.replace(/(^|-)(\w)/g, (_, d, ch) => (d ? ' ' : '') + ch.toUpperCase()).replace('Qa', 'QA');
@@ -134,8 +233,8 @@ const cap = (m) => m[0].toUpperCase() + m.slice(1);
 export function notice(role, model, sessionModel, lang = 'id') {
   const en = lang === 'en';
   if (model === 'inherit') return en ? `Delegating to ${role} on the main session model.` : `Delegasi ke ${role} dengan model sesi utama.`;
-  if (sessionModel && sessionModel === model) return en ? `Delegating to ${role} on ${cap(model)}, the same model as the main session (no model switch).` : `Delegasi ke ${role} dengan model ${cap(model)}, sama dengan model sesi utama (tidak ada perpindahan model).`;
-  return en ? `Switching to model ${cap(model)} to act as ${role}.` : `Perpindahan ke model ${cap(model)}, karena bertugas sebagai ${role}.`;
+  if (sessionModel && sessionModel === model) return en ? `Delegating to ${role} with ${cap(model)}, same as the main session model.` : `Delegasi ke ${role} dengan model ${cap(model)}, sama dengan model sesi utama (tidak ada perpindahan model).`;
+  return en ? `Switching to ${cap(model)}, acting as ${role}.` : `Perpindahan ke model ${cap(model)}, karena bertugas sebagai ${role}.`;
 }
 
 export function formatRoute(r) {
@@ -167,21 +266,57 @@ export function readRoutes(c) {
   return fs.readFileSync(metricsFile(c), 'utf8').split('\n').filter(Boolean).flatMap((l) => { try { return [JSON.parse(l)]; } catch { return []; } });
 }
 
+// Hook events (autocontext.jsonl): suggestion, suggestion-outcome, delegation, delegation-denied. null when never recorded.
+function hookEvents(c) {
+  const f = c.p('state', 'autocontext.jsonl');
+  if (!fs.existsSync(f)) return null;
+  return fs.readFileSync(f, 'utf8').split('\n').filter(Boolean).flatMap((l) => { try { return [JSON.parse(l)]; } catch { return []; } });
+}
+
 export function routeStats(c) {
   const rs = readRoutes(c);
   const count = (k) => rs.reduce((m, r) => ((m[r[k] ?? 'none'] = (m[r[k] ?? 'none'] || 0) + 1), m), {});
   const wf = {};
   for (const r of rs) if (r.workflow) (wf[r.workflow] ||= new Set()).add(r.agent);
-  return { routes: rs.length, byTier: count('tier'), byAgent: count('agent'), byCategory: count('category'),
+  const base = { routes: rs.length, byTier: count('tier'), byAgent: count('agent'), byCategory: count('category'),
     escalations: rs.filter((r) => r.escalatedFrom).length, contextReuse: rs.filter((r) => r.contextReuse).length,
     agentsPerWorkflow: Object.fromEntries(Object.entries(wf).map(([k, v]) => [k, v.size])) };
+  const ev = hookEvents(c);
+  if (!ev) return { ...base, suggestions: null, delegations: null };
+  const of = (name) => ev.filter((e) => e.event === name);
+  const sug = of('suggestion'), out = of('suggestion-outcome'), del = of('delegation'), denied = of('delegation-denied');
+  const outcome = (o) => out.filter((e) => e.outcome === o).length;
+  const resolved = new Set(out.map((e) => e.suggestionId));
+  return { ...base,
+    // A suggestion counts as followed only when the suggested agent actually ran during the same prompt (session + prompt id).
+    suggestions: { generated: sug.length, complex: sug.filter((e) => e.decision === 'complex').length, followed: outcome('followed'),
+      direct: outcome('direct'), otherAgent: outcome('other-agent'), unresolved: sug.filter((e) => !resolved.has(e.id)).length },
+    delegations: { total: del.length, viaRoute: del.filter((e) => e.routeId).length, direct: del.filter((e) => !e.routeId).length,
+      verified: del.filter((e) => e.actual?.length).length, unverified: del.filter((e) => !e.actual?.length).length,
+      foreground: del.filter((e) => e.shape === 'foreground' || e.shape === 'sync').length, background: del.filter((e) => e.shape === 'background').length,
+      modeUnknown: del.filter((e) => !e.shape).length, backgroundRejected: denied.filter((e) => e.kind === 'background').length,
+      concurrentRejected: denied.filter((e) => e.kind === 'concurrent').length } };
 }
 
 export function formatStats(s) {
   const kv = (o) => Object.entries(o).map(([k, v]) => `${k} ${v}`).join(' · ') || '—';
-  return [`Routes: ${s.routes} · escalations: ${s.escalations} · context reused: ${s.contextReuse}`,
+  const lines = [`Routes: ${s.routes} · escalations: ${s.escalations} · context reused: ${s.contextReuse}`,
     `By tier: ${kv(s.byTier)}`, `By agent: ${kv(s.byAgent)}`, `By category: ${kv(s.byCategory)}`,
-    `Agents per workflow: ${kv(s.agentsPerWorkflow)}`].join('\n');
+    `Agents per workflow: ${kv(s.agentsPerWorkflow)}`, ''];
+  const g = s.suggestions, d = s.delegations;
+  if (!g) return [...lines, 'Suggestions and delegations: unavailable (no hook telemetry recorded in this project yet).'].join('\n');
+  return [...lines, 'Suggestions and delegations:',
+    `- Suggestions generated: ${g.generated} (complex: ${g.complex})`,
+    `- Followed (suggested agent ran): ${g.followed}`,
+    `- Ignored (direct response): ${g.direct}`,
+    `- Different agent delegated: ${g.otherAgent}`,
+    `- Outcome unknown (turn not finished yet or interrupted): ${g.unresolved}`,
+    `- Delegations through rmc route: ${d.viaRoute}`,
+    `- Direct agent delegations (no rmc route): ${d.direct}`,
+    `- Actual model verified (subagent transcript): ${d.verified}`,
+    `- Actual model unavailable: ${d.unverified}`,
+    `- Foreground: ${d.foreground} · background detected: ${d.background} · mode unknown: ${d.modeUnknown}`,
+    `- Background rejected: ${d.backgroundRejected} · concurrent agent rejected: ${d.concurrentRejected}`].join('\n');
 }
 
 export function formatCategories(c) {

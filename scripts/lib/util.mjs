@@ -81,3 +81,8 @@ export function requireInit(c) {
 }
 
 export const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+
+export function readHandoffs(c) {
+  if (!fs.existsSync(c.handoffs)) return [];
+  return fs.readFileSync(c.handoffs, 'utf8').split('\n').filter(Boolean).map((l, i) => { try { return JSON.parse(l); } catch { return { invalid: i + 1 }; } });
+}

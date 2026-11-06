@@ -125,14 +125,22 @@ rmc route categories            # categories, tiers and signals
 
   Unsupported values fall back to `routing.fallbackTier`.
 - **Escalation.** `rmc route --escalate <R-id> --reason "…" --handoff <H-id>` moves one subtask up a tier, at most `maxEscalations` times, and carries the previous agent's hand-off forward so the work isn't repeated.
-- **Metrics.** `rmc route stats` reports routes by tier, agent and category, plus escalations, context reuse and agents per workflow. Only metadata is stored; never prompts or code.
+- **Metrics.** `rmc route stats` reports routes by tier, agent and category, plus escalations, context reuse and agents per workflow. It also separates suggestions generated, followed, ignored (direct response) and outcome unknown; delegations through `rmc route` versus direct agent calls; actual model verified versus unavailable; foreground runs; and rejected background or concurrent calls. A metric with no telemetry shows as `unavailable`, not an estimate. Only metadata is stored; never prompts or code.
+
+### Routing suggestions for ordinary prompts (Claude Code)
+
+Slash commands always route. Ordinary prompts get a **suggestion** — a deterministic recommendation that Claude may follow or ignore:
+- **When.** In an initialized project, the `UserPromptSubmit` hook classifies each prompt with keyword rules (English and Indonesian, no model call). The classifier maps the prompt to a task category and complexity signals, and the existing `rmc route` resolver picks the agent and model with the usual precedence. Greetings, general-knowledge questions, simple lookups ("where is X?") and prompts without a project reference get no suggestion. A suggestion is also skipped below `routing.suggestMinConfidence` (default `0.7`), where an intent alone scores 0.5, a project reference adds 0.3, and knowledge hits add up to 0.2.
+- **What Claude sees.** One line of about 50 tokens, such as `RM Context suggests Quick QA (Haiku) for this codebase search and retrieval. To delegate: rmc route --suggested --session-model <id>, show its Notice, run it in the foreground. Simple? Answer directly.` The session summary carries a short policy: suggestions are advice, simple lookups are answered directly, and Claude does not claim a delegation it did not make.
+- **Reuse.** `rmc route --suggested` reuses the classification made for the current prompt. The SessionStart hook exports `RMC_SESSION_ID` to Bash for this. The classification is kept only for the same session, the same project and the current prompt, and expires after 30 minutes. A new prompt or Stop ends it, so an earlier prompt's classification is never reused. Without a current suggestion, give `--category` explicitly.
+- **What it does not do.** The hook never calls the Agent tool, never blocks a prompt or tool, and never changes the main session model. Whether to delegate is always Claude's decision. Set `"routing": { "autoSuggest": false }` in `.rmcontext/config.json` to turn suggestions and the policy line off.
 
 ### Foreground delegation and switch notices (Claude Code)
 
 Delegation is synchronous and visible:
 - **Foreground, one agent at a time.** RM Context agents run in the foreground and the main session waits for the result. Roles run one after another, never in parallel, unless the user explicitly asks for it. A `PreToolUse` hook enforces this: it denies an `rmc:*` agent call with `run_in_background`, and a second `rmc:*` agent while one is still running. To allow background or parallel agents for a project, set `"delegation": { "background": "allow" }` in `.rmcontext/config.json`. Other plugins' agents are not affected.
-- **Notice before a switch.** `rmc route --session-model <main session model>` prints a `Notice:` line that the main session shows before delegating, such as `Perpindahan ke model Haiku, karena bertugas sebagai Quick QA.` If the subagent model is the same as the main session's, it says so instead (`… sama dengan model sesi utama (tidak ada perpindahan model)`). Nothing is shown when the main session does the work itself. Set `routing.noticeLanguage` to `en` for English notices (`Switching to model Haiku to act as Quick QA.`).
-- **The model that actually ran.** The notice states what is requested. After the agent returns, a `PostToolUse` hook reads the subagent's own transcript and gives the main session the model recorded on each of its turns and Claude Code's `requestShape` (foreground or background). The main session reports that. When the transcript cannot be read, it says the model could not be verified, rather than repeating the configured one. Each delegation is logged as metadata (agent, requested model, actual model, mode, tokens, duration) in `.rmcontext/state/autocontext.jsonl`, never the prompt.
+- **Notice before a switch.** `rmc route --session-model <main session model>` prints a `Notice:` line that the main session shows before delegating, such as `Perpindahan ke model Haiku, karena bertugas sebagai Quick QA.` If the subagent model is the same as the main session's, it says so instead (`… sama dengan model sesi utama (tidak ada perpindahan model)`). Nothing is shown when the main session does the work itself. Set `routing.noticeLanguage` to `en` for English notices (`Switching to Haiku, acting as Quick QA.` / `Delegating to Senior Engineer with Sonnet, same as the main session model.`).
+- **The model that actually ran.** The notice states what is requested. After the agent returns, a `PostToolUse` hook reads the subagent's own transcript and gives the main session the model recorded on each of its turns and Claude Code's `requestShape` (foreground or background). The main session reports that. When the transcript cannot be read, it reports `Delegation started; actual model not yet verified.` rather than repeating the configured one. Each delegation is logged as metadata (agent, requested model, actual model, mode, tokens, duration) in `.rmcontext/state/autocontext.jsonl`, never the prompt.
 
 **Platform limits.** RM Context recommends a model for each delegated agent. Applying it depends on the platform. In Claude Code, the model is set on the subagent; **your main session's model never changes** (use `/model` for that). Without an adapter, `rmc route` is a recommendation only.
 
@@ -164,8 +172,10 @@ Adjust it in `.rmcontext/config.json`:
 
 ```json
 { "autoContext": { "enabled": true, "sessionStart": true, "promptRetrieval": true, "incrementalRefresh": true,
-                   "maxContextTokens": 1200, "sessionContextTokens": 250, "maxResults": 8, "minimumRelevance": 0.45 } }
+                   "maxContextTokens": 1200, "sessionContextTokens": 330, "maxResults": 8, "minimumRelevance": 0.45 } }
 ```
+
+Relevance is the idf-weighted share of the prompt's known terms that a node matches. It is taken over the six most discriminative terms, and words the prompt repeats weigh more (1 + ln tf). A long prompt is therefore not diluted by its incidental words, but a node must still match the prompt's strongest terms to pass `minimumRelevance`. Prompts with six or fewer known terms and no repeated words score as before.
 
 To turn it off, set `"enabled": false` or set the environment variable `RMC_AUTO_CONTEXT=0`. The CLI and commands keep working. `rmc context status` shows usage, average tokens and latency, the last refresh, and hook errors. `rmc context "<prompt>"` shows what would be added for a prompt.
 
@@ -565,7 +575,7 @@ To approve a document, say so in chat, e.g. *"Approve FSD-001, approved by Jane 
 | `models` | Pin an agent to a model for this project, e.g. `{ "project-manager": "opus" }`. This turns off adaptive routing for that agent. Values: `opus`, `sonnet`, `haiku`, `inherit`, or a `claude-…` id |
 | `ignore` | Extra gitignore-style patterns to skip, e.g. `["legacy/**"]`. A `.rmcontextignore` file at the project root works too |
 | `maxFileBytes` | Files larger than this are skipped |
-| `routing` | Overrides plugin routing settings, e.g. `{ "enabled": false }`, `{ "maxEscalations": 2 }` or `{ "noticeLanguage": "en" }` (delegation notice language: `id` default, `en`) |
+| `routing` | Overrides plugin routing settings, e.g. `{ "enabled": false }`, `{ "maxEscalations": 2 }` or `{ "noticeLanguage": "en" }` (delegation notice language: `id` default, `en`). `autoSuggest` (default `true`) turns routing suggestions for ordinary prompts on or off; `suggestMinConfidence` (default `0.7`) is their threshold |
 | `delegation` | `{ "background": "allow" }` lets RM Context agents run in the background or in parallel. Default: denied (foreground, one at a time). `RMC_ALLOW_BACKGROUND=1` does the same for one shell |
 | `tiers` | Overrides the tier → model mapping, e.g. `{ "medium": "opus" }` |
 | `autoContext` | Automatic context settings for Claude Code. See [Automatic context](#automatic-context-claude-code) |

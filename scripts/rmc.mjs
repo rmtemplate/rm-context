@@ -21,6 +21,7 @@ Core
   routing [--json] [--agent name]  Agent default models, tiers and overrides
   route --category <c> [--agent a] [--signals s,s] [--model m] [--session-model m] [--workflow w] [--handoff H-id] [--json] [--no-record]
                                    Adaptive model choice for one delegation (see: route categories)
+  route --suggested [--session-model m]   Same, reusing the routing suggestion made for the current prompt
   route --escalate <R-id> --reason "…" [--handoff H-id]   Next tier for the same agent, reusing its hand-off
   route categories | stats [--json]
   handoff add <file.json> | list [--to agent]
@@ -185,7 +186,7 @@ async function main(argv) {
       if (sub) fail(`Unknown: rmc route ${sub}. Use: rmc route --category <c> | categories | stats`);
       const r = R.route(c, { agent: args.agent, category: args.category, signals: args.signals, model: args.model,
         workflow: args.workflow, handoff: args.handoff, contextReuse: Boolean(args['context-reuse']), sessionModel: args['session-model'],
-        escalate: args.escalate, reason: typeof args.reason === 'string' ? args.reason : undefined, record: !args['no-record'] });
+        escalate: args.escalate, reason: typeof args.reason === 'string' ? args.reason : undefined, record: !args['no-record'], suggested: Boolean(args.suggested) });
       return out(args.json ? r : R.formatRoute(r));
     }
     case 'context': {

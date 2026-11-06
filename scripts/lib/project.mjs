@@ -1,7 +1,7 @@
 // Project-level operations: init, status, validation, search, impact, RTM, links, routing, hand-offs.
 import fs from 'node:fs';
 import path from 'node:path';
-import { readJson, writeJson, writeFile, now, fail, git, PLUGIN_ROOT, SCHEMA_VERSION, sha1 } from './util.mjs';
+import { readJson, writeJson, writeFile, now, fail, git, PLUGIN_ROOT, SCHEMA_VERSION, sha1, readHandoffs } from './util.mjs';
 import { listFiles } from './ignore.mjs';
 import * as G from './graph.mjs';
 import { validateAllDocs } from './docs.mjs';
@@ -61,10 +61,7 @@ export function addHandoff(c, h) {
   fs.appendFileSync(c.handoffs, JSON.stringify(rec) + '\n');
   return `Recorded hand-off ${rec.id}: ${rec.from} → ${rec.to}`;
 }
-export function readHandoffs(c) {
-  if (!fs.existsSync(c.handoffs)) return [];
-  return fs.readFileSync(c.handoffs, 'utf8').split('\n').filter(Boolean).map((l, i) => { try { return JSON.parse(l); } catch { return { invalid: i + 1 }; } });
-}
+export { readHandoffs }; // lives in util.mjs so the routing hook path does not load this module
 export function listHandoffs(c, to) {
   const hs = readHandoffs(c).filter((h) => !to || h.to === to).slice(-20);
   if (!hs.length) return 'No hand-offs recorded.';
