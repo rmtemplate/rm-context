@@ -10,7 +10,7 @@ RM Context agents work like one engineering organisation. They share **one struc
 ## 1. The CLI is the only writer of structured data
 
 Locate the CLI once, in this order:
-1. The exact command line given in your task (e.g. `node "/…/rm-context/scripts/rmc.mjs"`).
+1. The exact command line given in your task (e.g. `node "/…/scripts/rmc.mjs"`).
 2. The `cli` field of `.rmcontext/.local/local.json`. Read the file.
 3. The output of `printenv RMC_CLI`, which the plugin's session hook exports.
 
@@ -115,16 +115,18 @@ End every task with a compact report:
 - **Delegate only when needed.** One role per step; never spawn every agent "to be thorough". Answer simple questions yourself or with `quick-qa`.
 - **Choose the agent and the model separately.** The agent follows the work (an FSD goes to the BA). The model follows the difficulty of this particular task. See *Model routing* below.
 - **Pass context, not instructions to rediscover it.** Give the agent the request, the `rmc` command line, relevant ids and paths, and the upstream hand-off ids.
-- Run steps **sequentially** when a later role consumes an earlier role's output. Run in parallel only when steps are independent (e.g. DevOps assessment alongside the SA's API mapping).
+- **Foreground, one agent at a time.** Call the Agent tool without `run_in_background` and wait for its result before the next step. Run roles one after another, even when steps are independent; run in parallel only when the user explicitly asks. The plugin's hooks deny background or concurrent RM Context agents unless `delegation.background` is `"allow"` in `.rmcontext/config.json`.
+- **Announce real switches only.** Right before a delegation, show the `Notice:` line printed by `rmc route` exactly as printed (for example `Perpindahan ke model Sonnet, karena bertugas sebagai Business Analyst.`). Show nothing when you do the work yourself, and no extra notice for internal steps that do not start a new agent.
+- **Report the model that ran, not the one requested.** After the agent returns, the `[RM CONTEXT] Delegation check` note gives the model read from the subagent's transcript and whether it ran in the foreground. Report that. If it says the model could not be verified, or differs from the request, say so; never claim the switch succeeded from configuration or from the notice alone.
 - After the workflow, run `rmc validate` and `rmc viewer`, and summarise for the user. Include what still needs a user decision.
 
 ### Model routing
 
 Before each delegation, assess the task, then run:
 
-`rmc route --agent <agent> --category <category> [--signals s,s] [--workflow <slug>] [--handoff <H-id>]`
+`rmc route --agent <agent> --category <category> --session-model <your model id> [--signals s,s] [--workflow <slug>] [--handoff <H-id>]`
 
-Pass the returned `model` to the Agent tool. Show the user the routing block it prints; for low-tier tasks it prints a single line. `rmc route categories` lists the categories with their default tier and agent.
+`--session-model` is the model you, the main session, are running on; with it the notice says "same model, no switch" instead of announcing a switch that does not happen. Pass the returned `model` to the Agent tool. Show the user the `Notice:` line and the routing block it prints; for low-tier tasks the block is a single line. `rmc route categories` lists the categories with their default tier and agent.
 
 **Signals.** Add only the ones that are true for this task:
 
@@ -164,15 +166,16 @@ If the stronger model is blocked too, report to the user.
 
 **Token economy:**
 - Delegate to the fewest agents that can do the job.
+- No background agents, no parallel agents, no polling: one foreground agent, one result.
 - Pass ids, paths and hand-off ids rather than whole documents.
 - Reuse hand-offs instead of re-scanning.
 - Run `rmc refresh` only when files changed.
 
-**Main session.** `rmc route` sets the model of the delegated agent only. The main session's model never changes; only the user changes it, with `/model`. Never tell the user it was switched.
+**Main session.** `rmc route` sets the model of the delegated agent only. The main session's model never changes; only the user changes it, with `/model`. Never tell the user it was switched. The notice describes a delegation to an agent on that model, not a change of the main session's model.
 
 ## 7. Workflows
 
-### A — New project discovery (`/rm-context:discover`)
+### A — New project discovery (`/rmc:discover`)
 1. **BA:** objectives, stakeholders, scope, BRs (BRD and stakeholder analysis). Open questions go back to the user before continuing if they block scope.
 2. **SA:** translate BRs into SRs, the system context, and draft data/API design (SRS, UML context, ERD if data exists).
 3. **Senior Engineer:** feasibility and key decisions (technical design outline, ADRs for irreversible choices).
@@ -180,7 +183,7 @@ If the stronger model is blocked too, report to the user.
 5. **PM:** WBS, milestones and dependencies in `plan.json` (dates TBD unless the user gave them), roadmap, RAID.
 6. **Orchestrator:** `rmc validate`, `rmc rtm`, `rmc viewer`.
 
-### B — Feature development (`/rm-context:feature`)
+### B — Feature development (`/rmc:feature`)
 1. **BA:** clarify the feature → BR/US with acceptance criteria.
 2. **SA:** functional flow, API and data changes (FSD/SRS delta, sequence diagram).
 3. **Senior Engineer:** implementation plan grounded in `rmc impact`.
@@ -190,7 +193,7 @@ If the stronger model is blocked too, report to the user.
 7. **Documentation:** update affected documents (`rmc doc revise`).
 8. **Orchestrator:** `rmc refresh`, link `implements`/`tested_by` edges, `rmc rtm`.
 
-### C — Existing project assessment (`/rm-context:assess`)
+### C — Existing project assessment (`/rmc:assess`)
 1. **Core intelligence:** `rmc init` or `rmc refresh`. The `architecture` agent writes `context/overview.md`, `architecture.md` and `conventions.md`.
 2. **BA:** business functionality inferred from evidence. Every BR is `inferred` with code evidence or marked Open Question.
 3. **SA:** system behaviour, integrations and data model (ERD, API spec, integration notes).
@@ -198,7 +201,7 @@ If the stronger model is blocked too, report to the user.
 5. **DevOps:** deployment and infrastructure assessment (infrastructure design, security checklist).
 6. **PM:** actual progress from evidence (`rmc pm health`). Never infer completion from elapsed time.
 
-### D — Change impact (`/rm-context:impact`)
+### D — Change impact (`/rmc:impact`)
 1. `rmc impact "<changed requirement, node or file>"` (or `--changed`).
 2. Read the report. For `inferred` hops, verify in source.
 3. List affected BRs, modules, APIs and tables, files, infrastructure, plan tasks and documents.

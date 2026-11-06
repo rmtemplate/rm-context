@@ -154,7 +154,7 @@ const EXTRACTORS = {
     all(/^(\s*)class\s+(\w+)(?:\(([^)]*)\))?\s*:/gm, text, (m) => {
       const l = lineAt(m.index + m[1].length);
       x.decls.push({ type: 'class', name: m[2], line: l, end: pyEnd(text, l) });
-      if (/models\.Model|Base\b|DeclarativeBase|SQLModel/.test(m[3] || '')) x.decls.push({ type: 'entity', name: m[2], line: l });
+      if (/models\.Model|Base\b|DeclarativeBase|SQLModel/.test(m[3] || '')) x.decls.push({ type: 'entity', name: m[2], line: l, orm: /models\.Model/.test(m[3]) ? 'django' : 'sqlalchemy' });
     });
     const tn = text.match(/__tablename__\s*=\s*['"](\w+)['"]/);
     if (tn) x.meta.modelTable = tn[1];
@@ -432,5 +432,5 @@ function mergeRoutes(x, a, rel) {
   if (a.extraDecls) x.decls.push(...a.extraDecls.filter((d) => !x.decls.some((e) => e.name === d.name && e.line === d.line)));
   if (a.claimed || a.routes) x.routes = a.routes || [];
   else { const fw = a.frameworks?.[0]?.id; x.routes = x.routes.map((r) => ({ ...r, ...(fw ? { framework: fw } : {}), extraction: 'regex', status: 'partial', exact: false, note: fw ? `matched by the generic pattern extractor (${fw} recognised; prefixes and groups are not composed)` : 'matched by a generic pattern; no supported framework was detected in this file' })); }
-  for (const k of ['consts', 'frameworks', 'routeCalls', 'routeConv', 'routeApp', 'routeIssues', 'routeStats', 'routeClasses']) if (a[k]) x[k] = a[k];
+  for (const k of ['consts', 'frameworks', 'routeCalls', 'routeConv', 'routeApp', 'routeIssues', 'routeStats', 'routeClasses', 'routeLocators', 'routeCtrls']) if (a[k]) x[k] = a[k];
 }

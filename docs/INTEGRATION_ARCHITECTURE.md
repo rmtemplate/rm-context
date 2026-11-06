@@ -63,7 +63,7 @@ Tier-to-model mapping lives in the `tiers` block of `config/models.json`, which 
 
 | Platform | Adapter | Mechanisms checked in the platform's documentation (November 2026) |
 |---|---|---|
-| Claude Code | **Supported**: `agents/`, `skills/`, `commands/`, `hooks/`, `.claude-plugin/` | Plugin marketplace; subagents take a `model` alias per delegation; `!` context injection; `SessionStart`, `UserPromptSubmit`, `PostToolUse` and `Stop` hooks (automatic context, verified in a headless session) |
+| Claude Code | **Supported**: `agents/`, `skills/`, `commands/`, `hooks/`, `.claude-plugin/` | Plugin marketplace; subagents take a `model` alias per delegation; `!` context injection; `SessionStart`, `UserPromptSubmit`, `PostToolUse` and `Stop` hooks (automatic context, verified in a headless session); `PreToolUse`/`PostToolUse` on `Agent` for foreground delegation and actual-model reporting (verified in a headless session) |
 | OpenAI Codex | **Planned** | `AGENTS.md`; skills in `.agents/skills`; custom agents as TOML files in `.codex/agents/` with `name`, `description`, `developer_instructions` and optional `model` |
 | OpenCode | **Planned** | Agents as Markdown in `.opencode/agents/` with `mode: subagent` and `model: provider/model`; commands in `.opencode/commands/`; subagents inherit the parent's model if none is set |
 | Cursor | **Planned** | Rules and `AGENTS.md`; skills; subagents as Markdown in `.cursor/agents/` with `model: inherit` or a model id; hooks in `hooks.json` |

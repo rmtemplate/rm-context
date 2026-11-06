@@ -114,19 +114,34 @@ export function route(c, opts = {}) {
     handoff: handoff?.id || null, contextReuse: Boolean(handoff || opts.contextReuse || sig.flags.has('context')),
     mainSessionModelChanged: false, notes,
   };
+  // What the user is told before the delegation. It names the model being requested for the subagent; whether that model
+  // actually ran is reported afterwards from the subagent transcript (post-agent hook), never inferred from this.
+  const fam = (m) => /(opus|sonnet|haiku)/.exec(String(m || '').toLowerCase())?.[1] || null;
+  r.sessionModel = fam(opts.sessionModel);
+  r.notice = notice(roleName(agent), r.model, r.sessionModel, cfg.routing.noticeLanguage);
   if (opts.record !== false && fs.existsSync(c.manifest)) {
     fs.mkdirSync(path.dirname(metricsFile(c)), { recursive: true });
     // Metadata only: no prompts, no source code.
-    const { notes: _n, ...meta } = r;
+    const { notes: _n, notice: _t, ...meta } = r;
     fs.appendFileSync(metricsFile(c), JSON.stringify(meta) + '\n');
   }
   return { ...r, handoffDetail: handoff };
 }
 
+export const roleName = (agent) => agent.replace(/(^|-)(\w)/g, (_, d, ch) => (d ? ' ' : '') + ch.toUpperCase()).replace('Qa', 'QA');
+const cap = (m) => m[0].toUpperCase() + m.slice(1);
+// noticeLanguage: 'id' (default) or 'en'. A delegation on the main session's own model is not announced as a model switch.
+export function notice(role, model, sessionModel, lang = 'id') {
+  const en = lang === 'en';
+  if (model === 'inherit') return en ? `Delegating to ${role} on the main session model.` : `Delegasi ke ${role} dengan model sesi utama.`;
+  if (sessionModel && sessionModel === model) return en ? `Delegating to ${role} on ${cap(model)}, the same model as the main session (no model switch).` : `Delegasi ke ${role} dengan model ${cap(model)}, sama dengan model sesi utama (tidak ada perpindahan model).`;
+  return en ? `Switching to model ${cap(model)} to act as ${role}.` : `Perpindahan ke model ${cap(model)}, karena bertugas sebagai ${role}.`;
+}
+
 export function formatRoute(r) {
-  const name = r.agent.replace(/(^|-)(\w)/g, (_, d, ch) => (d ? ' ' : '') + ch.toUpperCase()).replace('Qa', 'QA');
+  const name = roleName(r.agent);
   const model = r.model === 'inherit' ? 'main session model (pass your own alias)' : r.model[0].toUpperCase() + r.model.slice(1);
-  const lines = [];
+  const lines = r.notice ? [`Notice: ${r.notice}`] : [];
   if (r.tier === 'low' && !r.escalatedFrom && !r.notes.length) {
     lines.push(`RM Context Routing: ${name} · ${model} · low (${r.id})`);
   } else {
@@ -143,7 +158,7 @@ export function formatRoute(r) {
       ...(h.artifacts?.length ? [`  artifacts: ${h.artifacts.join(', ')}`] : []),
       ...(h.openQuestions?.length ? [`  open questions: ${h.openQuestions.join(' | ')}`] : []));
   }
-  lines.push(`Delegate with model: ${r.model === 'inherit' ? '<your own model alias>' : r.model}. The main session model is unchanged.`);
+  lines.push(`Delegate with model: ${r.model === 'inherit' ? '<your own model alias>' : r.model}, in the foreground (never run_in_background), one agent at a time; wait for its result. The main session model is unchanged.`);
   return lines.join('\n');
 }
 

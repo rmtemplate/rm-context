@@ -13,5 +13,5 @@ allowed-tools: Bash(node:*)
 
 1. Present the health report. Explain the RAG verdict using the stated rules; don't soften or inflate it.
 2. Add context the report cannot see, such as uncommitted changes (`git status --short | head`). Label it clearly as your observation.
-3. If there is no plan, explain that progress cannot be assessed without one, and offer `/rm-context:pm` to build it from evidence.
+3. If there is no plan, explain that progress cannot be assessed without one, and offer `/rmc:pm` to build it from evidence.
 4. If the user passed `save`, write the report to `.rmcontext/project-management/health-<YYYY-MM-DD>.md` with `rmc pm health --out …`.

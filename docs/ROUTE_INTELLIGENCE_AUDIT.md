@@ -219,3 +219,39 @@ Fixtures under `tests/fixtures/routes/<framework>/…` with realistic layouts (c
 ## Implementation status (Unreleased)
 
 Implemented as proposed above for C# and Java/Kotlin. Fixtures and tests: `tests/fixtures/routes/{dotnet-shop,spring-shop,jvm-misc}`, `tests/routes.test.mjs` (12 tests, including an incremental CLI refresh that changes a shared route constant, deletes a controller and checks that agent edges follow the remapped route id). Other languages are recognised by detection-only registry entries (`scripts/lib/routes/adapters/{js,php,python,go,ruby,rust}.mjs`); their routes still come from the pattern extractor in `scripts/lib/extract.mjs`, tagged `extractionMethod: regex`, `resolutionStatus: partial`. Not done yet: structural adapters for those languages, and the viewer API Explorer filters.
+
+## QA fixes (TC-001, independent QA of C# and Java/Kotlin)
+
+QA suite `tests/routes-qa.test.mjs`: 15/29 before, **29/29 after**. Regression tests per bug are in `tests/routes.test.mjs` (fixture `tests/fixtures/routes/regress/`). Both files are part of `npm test`.
+
+| Bug | Fix | Status (tests) |
+|---|---|---|
+| B1 profile config | Only `application.properties`/`application.yml` (default profile) resolve placeholders and context-path; properties beat yml, application beats bootstrap. `application-<profile>.*` values are recorded on the route as `attrs.conditional` (`profile`, `key`, `value`, `file`, `line`) and in the resolution steps; a key defined only in a profile leaves the route partial/inferred with that reason. | Fixed: QA-J-01/03/06/07, regression B1 |
+| B2 generic return types | A soft-keyword method name (`list`, `select`, `export`, `match`, `from`, …) is a declaration after `>`, `]` or `?`; the annotation scan no longer stops at commas inside generic arguments (`Map<String, List<X>>`, `Dictionary<string, object>`). | Fixed: QA-J-08/11, regression B2/B3 |
+| B3 C# `object` | `object` is a type keyword only in Kotlin. Positional records are no longer indexed as functions. | Fixed: QA-CS-14/16, regression B2/B3 |
+| B4 JAX-RS sub-resources | A class without class `@Path` gets its prefix from locator methods whose declared return type is that class (composed cross-file, marked inferred). A locator returning an unseen class is reported as an unsupported pattern. | Fixed: QA-J-09, regression B4 |
+| B5 agent edges on id change | Each api node stores `attrs.declKeys` (file, line, method, controller.handler, local template, ordinal). A vanished id moves only when exactly one new route has the same declaration key; otherwise its agent edges are reported as orphaned. Graphs without `declKeys` use the previous file:line + method rule. | Fixed: regression B5 (CLI: prefix change, multi-prefix controller, unrelated edge kept, controller deletion, no dangling edges) |
+| B6 partial classes | A `partial` controller part without `[Route]` takes the prefix of the other part(s) of the same class (verified only when exactly one part declares it); with no such part the route is partial/inferred. | Fixed: QA-CS-07, regression B6 |
+| B7 inherited actions | Actions on abstract base controllers (ASP.NET Core, Spring) are templates instantiated for every controller whose declared base chain reaches the base; tokens use the derived name; overrides are not duplicated; a base with no derived controller is reported. | Fixed: QA-CS-06, QA-J-05, regression B7 |
+| B8 placeholders | Any non-secret key with a path-shaped value is stored, so `${app.paths.admin}` resolves; the missing-key reason now says what was searched. | Fixed: QA-J-04, regression B8 |
+| B9 entity → table | In the C#/Java typed linker, entity → table comes only from `[Table("x")]` (verified), `Entity<T>().ToTable("x")` (verified) or the EF Core default, the DbSet property name (inferred, exact match). Reads/writes target that mapped table, else the entity. | Fixed: regression B9 |
+| B10 nested-brace constraints | Path parameters are parsed with balanced braces. | Fixed: QA-CS-03 |
+| B11 local-variable reason | Unqualified lower-case identifiers report "a local variable or parameter". | Fixed: regression B8/B11 |
+
+**QA expectations amended** (stricter, not weaker): QA-CS-14 and QA-CS-16 matched `/#Find$/`, `/#Get$/` and `/#Charge$/`. Method ids were `file#Method` with `@line` for repeats, so the bare `#Charge` was **UserService**.Charge (the never-injected class) and the bare `#Find` was the interface method: the original CS-16 assertion could only pass through the forbidden link. Method ids are now class-qualified (`file#Class.method`), and the assertions match `OrdersController.Get`, `OrderService.Find` and `PaymentService.Charge`, plus an explicit "never UserService" check.
+
+**Remaining known limitations:** legacy (non-structural) extractors for Laravel, Rails, Django and JPA `@Entity` without `@Table` still map entities to tables by their naming conventions (marked inferred); EF `ToTable` is recognised only inside the DbContext class body; Spring profile activation (`spring.profiles.active`, `@Profile`) is not evaluated, by design.
+
+## QA re-run (TC-002)
+
+An independent re-run after the B1–B11 fixes, by the main session (not the implementer), with new fixtures `tests/fixtures/routes/qa2/{dotnet,jvm}` and `tests/routes-qa2.test.mjs`. Expectations were fixed before the engine ran. Before fixes: 12/16 pass. Findings were recorded in TC-002 before any change.
+
+| Bug | Severity | Finding | Fix | Status |
+|---|---|---|---|---|
+| B12 | High | Method ids became class-qualified without an `EXTRACTOR_VERSION` bump: unchanged files kept stale decls (mixed ids, B3 not applied to them); agent edges on methods were orphaned and dropped when a file changed. Only graphs built by the unreleased 5ced6de are affected; 0.4.1 had no C#/Java/Kotlin function nodes. | `EXTRACTOR_VERSION` 5; old `file#method` ids remap to the single `file#Class.method` in the same file (`functionIdChanges` in scan.json); zero or several candidates → reported as orphaned, never guessed. | PASS (QA2-INC-01) |
+| B13 | High | Actions inherited by a Spring controller kept `${catalog.base}` literally and were verified. | Class-level `@RequestMapping` prefixes used for inheritance go through the same placeholder parser as the controller's own. | PASS (QA2-J-03) |
+| B14 | Medium | EF mappings looked tables up in lower case only, so PascalCase schema tables never matched. | Case-insensitive table lookup; no edge when two tables differ only by case. | PASS (QA2-CS-07) |
+| B15 | Medium | Inferred entity → table edges had no reason. | Evidence `ref` names the mapping: `[Table("x")]`, `Entity<T>().ToTable("x")`, `EF Core default: …`, `JPA default naming …`, `Laravel …`, `Rails …`, `Django …`, `explicit table name …`. | PASS (QA2-CS-07, QA2-J-07, QA2-ENT-*) |
+| B16 | Medium | The legacy convention mapper pluralised for every language (JPA `Item` → `items`). | Per-framework exact conventions: JPA singular snake_case; Laravel/Rails plural snake_case; Django `<app>_<model>`; SQLAlchemy without `__tablename__`: no edge. Conventions stay `inferred`; explicit names `verified`. | PASS (QA2-J-07, QA2-ENT-01…04) |
+
+Test-authoring corrections (QA side, recorded in TC-002): table ids keep schema casing, so QA2 compares them case-insensitively; C# top-level-statement local functions (`Program.cs`) have no containing class, so they are excluded from the "no unqualified method id" check. No implementer test or round-1 QA expectation was changed in this round.

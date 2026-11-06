@@ -11,6 +11,8 @@ const MODIFIERS = new Set(['public', 'private', 'protected', 'internal', 'static
   'external', 'actual', 'expect', 'get', 'set', 'pub', 'required', 'lateinit', 'data', 'transient', 'volatile', 'const']);
 const SOFT_KW = new Set(['echo', 'print', 'array', 'list', 'isset', 'unset', 'empty', 'require', 'include', 'import', 'export', 'from', 'select', 'match', 'default', 'go', 'when', 'with', 'not', 'and', 'or', 'init', 'constructor']);
 const CLASS_KW = new Set(['class', 'interface', 'record', 'struct', 'enum', 'object', 'trait']);
+// 'object' declares a type only in Kotlin; in C# and Java it is a type name (object Foo(), Task<object>).
+const isClassKw = (v, fam) => CLASS_KW.has(v) && (v !== 'object' || fam === 'kt');
 const HEAD_FOLLOW = new Set(['{', '=>', ';', ':', 'throws', 'where', '=', '->']);
 
 export function famOf(lang, rel = '') {
@@ -179,7 +181,7 @@ function classes(P) {
   const out = [];
   for (let i = 0; i < toks.length - 1; i++) {
     const t = toks[i];
-    if (t.k !== 'id' || !CLASS_KW.has(t.v)) continue;
+    if (t.k !== 'id' || !isClassKw(t.v, fam)) continue;
     if (toks[i - 1]?.v === '.' || toks[i - 1]?.v === '::') continue;
     if (t.v === 'enum' && toks[i + 1]?.v === 'class') continue;
     const nameTok = toks[i + 1];
@@ -253,11 +255,14 @@ function annsBefore(P, i) {
 function annsBeforeDecl(P, n) {
   const { toks } = P;
   const out = [];
+  let angle = 0; // commas inside generic arguments (Map<String, List<X>>) belong to the return type
   for (let j = n - 1, guard = 0; j >= 0 && guard < 80; guard++) {
     const owner = P.anns.filter((a) => a.e === j);
     if (owner.length) { out.unshift(...owner); j = owner[0].s - 1; continue; }
     const t = toks[j];
-    if (t.k === 'p' && [';', '{', '}', ')', '=', ','].includes(t.v)) break;
+    if (t.k === 'p' && /^>+$/.test(t.v)) angle += t.v.length;
+    else if (t.k === 'p' && t.v === '<') angle = Math.max(0, angle - 1);
+    else if (t.k === 'p' && [';', '{', '}', ')', '=', ','].includes(t.v) && !(t.v === ',' && angle > 0)) break;
     j--;
   }
   return out;
@@ -271,7 +276,7 @@ function members(P, cls) {
     const t = toks[i];
     const ann = P.annAt.get(i);
     if (ann) { i = ann.e; continue; }
-    if (t.k === 'id' && CLASS_KW.has(t.v) && toks[i - 1]?.v !== '.') {
+    if (t.k === 'id' && isClassKw(t.v, fam) && toks[i - 1]?.v !== '.') {
       // Nested type: skip its header and body (it is parsed as its own class).
       let j = i + 1;
       while (j < cls.bodyEnd && !(toks[j].k === 'p' && (toks[j].v === '{' || toks[j].v === ';'))) { if (toks[j].v === '(' && match[j] > 0) j = match[j]; j++; }
@@ -348,7 +353,7 @@ function methodAt(P, i, cls) {
   while (p >= 0 && P.anns.some((a) => a.e === p)) p = P.anns.find((a) => a.e === p).s - 1;
   const prev = toks[p];
   // Contextual words (list, print, select, match, …) are ordinary method names after a modifier, type or fun/def.
-  const declared = prev?.k === 'id' && (MODIFIERS.has(prev.v) || /^(fun|function|def|fn|void)$/.test(prev.v) || !KEYWORDS.has(prev.v)) && prev.v !== 'return' && prev.v !== 'new';
+  const declared = (fam !== 'js' && ['>', ']', '?'].includes(prev?.v)) || prev?.k === 'id' && (MODIFIERS.has(prev.v) || /^(fun|function|def|fn|void)$/.test(prev.v) || !KEYWORDS.has(prev.v)) && prev.v !== 'return' && prev.v !== 'new';
   if (KEYWORDS.has(nameTok.v) && !(SOFT_KW.has(nameTok.v) && declared) && nameTok.v !== 'constructor' && nameTok.v !== 'init') return null;
   let ok = false;
   if (prev && prev.k === 'id' && (prev.v === 'fun' || prev.v === 'function' || prev.v === 'def' || prev.v === 'fn')) ok = true;
@@ -451,6 +456,8 @@ function functions(P) {
       if (toks[i].v === '{' && toks[i].k === 'p' && match[i] > i && (inClass(i) || inMember(i))) { i = match[i]; continue; }
       if (!(toks[i].k === 'p' && toks[i].v === '(') || inClass(i)) continue;
       const m = methodAt(P, i, null);
+      // record Pay(decimal Amount); and class C(IDep d) are positional type declarations, not local functions
+      if (m && isClassKw(toks[m.nameTok - 1]?.v, fam)) continue;
       if (m && !out.some((f) => f.nameTok === m.nameTok)) { out.push(m); i = m.lastTok; }
     }
   }

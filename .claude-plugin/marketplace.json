@@ -8,10 +8,10 @@
   },
   "plugins": [
     {
-      "name": "rm-context",
+      "name": "rmc",
       "source": "./",
       "description": "Your Project Intelligence Layer for AI Coding Agents. Professional agents with adaptive model routing on an evidence-backed project knowledge graph.",
-      "version": "0.4.1",
+      "version": "0.4.2",
       "homepage": "https://rmtemplate.com"
     }
   ]

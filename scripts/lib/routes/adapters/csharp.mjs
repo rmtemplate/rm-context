@@ -57,7 +57,7 @@ function meta(m, cls) {
 const CORE_BASES = new Set(['ControllerBase', 'Controller', 'AbpController', 'AbpControllerBase', 'ODataController']);
 function coreControllers(P) {
   return declarative(P, {
-    framework: 'aspnet-core', language: 'csharp', inheritPrefix: true, frameworkBases: CORE_BASES, tokens, paramIn, meta,
+    framework: 'aspnet-core', language: 'csharp', inheritPrefix: true, frameworkBases: CORE_BASES, tokens, paramIn, meta, abstractBases: true,
     isController: (c) => c.kind === 'class' && !has(c, 'NonController') && !(c.mods || []).includes('abstract') &&
       (has(c, /^(ApiController|Controller|Route)$/) || c.bases.some((b) => CORE_BASES.has(b.name)) || (/Controller$/.test(c.name) && (c.methods || []).some((m) => has(m, VERB_ATTR)))),
     classPrefixes: (c) => ann(c, 'Route').map((a) => tokensSafe(templateOf(a).expr)),
@@ -197,7 +197,7 @@ export default [
     extract(F) {
       const c = coreControllers(F.P), m = minimalApi(F.P);
       const conv = conventions(F.P, 'aspnet-core');
-      return { routes: [...c.routes, ...m.routes], callSites: m.callSites, conventions: conv, stats: { controllers: c.controllers, registrations: m.declarations }, issues: [] };
+      return { routes: [...c.routes, ...m.routes], callSites: m.callSites, conventions: conv, controllerClasses: c.controllerClasses, stats: { controllers: c.controllers, registrations: m.declarations }, issues: [] };
     },
     patterns: ['[ApiController]/[Controller] classes and ControllerBase/Controller subclasses', '[Route] on controllers (multiple, cartesian with actions)', '[HttpGet|Post|Put|Patch|Delete|Head|Options(template)]', '[AcceptVerbs(…, Route = …)]', '[Route] on actions', 'leading "/" or "~/" overrides the controller prefix', '[controller] [action] [area] tokens', 'route constraints, optional and catch-all parameters', '[FromRoute|Query|Body|Header|Form|Services]', '[Authorize]/[AllowAnonymous]', '[ApiVersion]/[MapToApiVersion] (recorded)', '[Produces]/[Consumes]/[ProducesResponseType]', 'base-controller [Route] inheritance (cross-file)', 'MapGet/MapPost/MapPut/MapPatch/MapDelete/MapMethods/Map/MapFallback/MapHealthChecks/MapHub', 'MapGroup chains and nested groups through local variables', 'route constants (const / static readonly, cross-file)', 'extension methods (this IEndpointRouteBuilder / RouteGroupBuilder) resolved through their call sites', 'RequireAuthorization on routes and groups', 'conventional routing (MapControllerRoute / MapDefaultControllerRoute) for non-attribute-routed controllers (inferred)'],
     limitations: ['Prefixes computed at runtime (method calls, configuration values) are recorded as unresolved', 'Route tokens are lower-cased; ASP.NET matches case-insensitively', 'API version route parameters (v{version:apiVersion}) are kept as templates; declared versions are recorded in apiVersion', 'Custom IRouteTemplateProvider attributes and application model conventions are not evaluated', 'Partial classes are not merged'],

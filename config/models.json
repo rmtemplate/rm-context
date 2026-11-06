@@ -47,7 +47,8 @@
     "defaultTier": "medium",
     "fallbackTier": "medium",
     "allowEscalation": true,
-    "maxEscalations": 1
+    "maxEscalations": 1,
+    "noticeLanguage": "id"
   },
   "tiers": {
     "low": "haiku",

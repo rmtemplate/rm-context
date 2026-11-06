@@ -4,6 +4,8 @@
 //   prompt         → relevant .rmcontext knowledge for the submitted prompt, within the token budget
 //   post-tool      → records files changed by Write/Edit/MultiEdit/NotebookEdit, or a possibly-mutating Bash command
 //   stop           → one coalesced incremental refresh for everything recorded during the turn
+//   pre-agent      → RM Context agents run in the foreground, one at a time (denies run_in_background / a second agent)
+//   post-agent     → reports the model that actually ran, read from the subagent transcript (never from configuration)
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -25,6 +27,7 @@ try {
   const conf = X.autoConfig(c);
 
   if (event === 'session-start') {
+    (await import('./lib/delegation.mjs')).clearLock(input.session_id);
     if (process.env.CLAUDE_ENV_FILE) fs.appendFileSync(process.env.CLAUDE_ENV_FILE, `export RMC_CLI="${CLI.replace(/\\/g, '/')}"\n`); // forward slashes: sourced by bash, also on Windows
     const text = X.sessionSummary(c, CLI);
     if (text) emit({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: text } });
@@ -43,7 +46,27 @@ try {
     if (c && conf.enabled && conf.incrementalRefresh) X.recordChange(c, input);
   }
 
+  else if (event === 'pre-agent') {
+    const D = await import('./lib/delegation.mjs');
+    const delegation = c && fs.existsSync(c.config) ? JSON.parse(fs.readFileSync(c.config, 'utf8')).delegation || {} : {};
+    const reason = D.preAgent(input, delegation);
+    if (reason) emit({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason } });
+  }
+
+  else if (event === 'post-agent') {
+    const D = await import('./lib/delegation.mjs');
+    if (input.hook_event_name === 'PostToolUseFailure') D.clearLock(input.session_id);
+    else if (D.isRmcAgent(input.tool_input?.subagent_type)) {
+      D.clearLock(input.session_id);
+      const f = D.agentFacts(input);
+      // Metadata only (agent, models, mode, size): never the prompt or the agent's output.
+      if (c) X.logEvent(c, { event: 'delegation', agent: f.agent, requested: f.requested, actual: Object.keys(f.models), shape: f.shape || (f.async ? 'background' : null), tokens: f.tokens, ms: f.durationMs });
+      emit({ hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: D.postAgentText(f) } });
+    }
+  }
+
   else if (event === 'stop') {
+    (await import('./lib/delegation.mjs')).clearLock(input.session_id);
     if (c && conf.enabled && conf.incrementalRefresh && !input.stop_hook_active) {
       const s = await X.applyPending(c);
       if (s) {

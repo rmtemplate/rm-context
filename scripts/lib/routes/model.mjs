@@ -43,6 +43,7 @@ export function render(expr, keepTrailing = false) {
   return { path: normalizePath(s, keepTrailing), unresolved };
 }
 function reasonOf(p) {
+  if (p.ref && /^[a-z_]\w*$/.test(p.ref)) return `${p.ref} is not a constant in the indexed files (a local variable or parameter); its runtime value is unknown`;
   if (p.ref) return 'constant not found in the repository';
   if (p.param) return 'registration function has no resolvable call site';
   if (p.base) return 'base class prefix not found';
@@ -59,9 +60,22 @@ export function pathParams(path) {
   const out = [];
   const seen = new Set();
   const add = (name, extra = {}) => { if (!name || seen.has(name)) return; seen.add(name); out.push({ name, in: 'path', ...extra }); };
-  for (const m of String(path).matchAll(/\{(?!\?)\**([A-Za-z_][\w-]*)(\.\.\.)?((?::[^{}]*(?:\{[^{}]*\}[^{}]*)*)?)(\?)?(=[^}]*)?\}/g)) {
-    const constraint = m[3] ? m[3].slice(1) : undefined;
-    add(m[1], { ...(constraint ? { constraint } : {}), ...(m[4] || m[5] ? { optional: true } : {}), ...(m[0].startsWith('{*') || m[2] ? { catchAll: true } : {}) });
+  const s = String(path);
+  for (let i = 0; i < s.length; i++) {
+    if (s[i] !== '{') continue;
+    let d = 0, j = i;
+    for (; j < s.length; j++) { if (s[j] === '{') d++; else if (s[j] === '}' && --d === 0) break; }
+    if (j >= s.length) break;
+    const inner = s.slice(i + 1, j);
+    i = j;
+    const m = /^(\*{0,2})([A-Za-z_][\w-]*)(\.\.\.)?/.exec(inner);
+    if (!m) continue; // {?query} expansions and literals
+    let rest = inner.slice(m[0].length), optional = false;
+    if (rest.endsWith('?')) { optional = true; rest = rest.slice(0, -1); }
+    if (rest.startsWith('=')) { optional = true; rest = ''; }
+    if (rest && !rest.startsWith(':')) continue;
+    const constraint = rest ? rest.slice(1).trim() : undefined;
+    add(m[2], { ...(constraint ? { constraint } : {}), ...(optional ? { optional: true } : {}), ...(m[1] || m[3] ? { catchAll: true } : {}) });
   }
   for (const m of String(path).matchAll(/(?:^|\/)[:*]([A-Za-z_]\w*)(\?)?/g)) add(m[1], { ...(m[2] ? { optional: true } : {}), ...(m[0].includes('*') ? { catchAll: true } : {}) });
   for (const m of String(path).matchAll(/<(?:(\w+):)?([A-Za-z_]\w*)(\.\.)?>/g)) add(m[2], { ...(m[1] ? { constraint: m[1] } : {}), ...(m[3] ? { catchAll: true } : {}) });

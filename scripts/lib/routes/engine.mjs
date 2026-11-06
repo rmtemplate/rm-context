@@ -2,6 +2,7 @@
 // Parser failures never abort a scan: they are reported as route issues for the file.
 import { famOf, parseFile, typedCalls, simpleType } from './structure.mjs';
 import { REGISTRY } from './registry.mjs';
+import { springPlaceholders } from './adapters/java.mjs';
 import { findSecrets } from '../ignore.mjs';
 
 const STRUCTURAL = new Set(['cs', 'java', 'kt']);
@@ -42,6 +43,8 @@ export function analyze(rel, text, lang) {
     if (r.callSites?.length) (out.routeCalls ||= []).push(...r.callSites.map((s) => ({ ...s, framework: a.id })));
     if (r.conventions?.length) (out.routeConv ||= []).push(...r.conventions);
     if (r.appPaths?.length) (out.routeApp ||= []).push(...r.appPaths);
+    if (r.locators?.length) (out.routeLocators ||= []).push(...r.locators.map((l) => ({ ...l, framework: a.id })));
+    if (r.controllerClasses?.length) (out.routeCtrls ||= []).push(...r.controllerClasses.map((c) => ({ ...c, framework: a.id })));
     if (r.issues?.length) (out.routeIssues ||= []).push(...r.issues.map((i) => ({ framework: a.id, ...i })));
     if (r.decls?.length) (out.extraDecls ||= []).push(...r.decls);
     if (r.stats) for (const [k, v] of Object.entries(r.stats)) if (v) ((out.routeStats ||= {})[a.id] ||= {})[k] = v;
@@ -61,7 +64,8 @@ function classPrefixFacts(c) {
     if (a.name !== 'Route' && a.name !== 'RequestMapping') continue;
     const x = a.args.find((y) => !y.name || /^(value|path|template)$/i.test(y.name));
     if (!x) { out.push([]); continue; }
-    for (const v of x.value.list || [x.value]) if (v.parts) out.push(v.parts);
+    // Spring ${prop} placeholders become config references here too, so inherited actions resolve them like the class's own.
+    for (const v of x.value.list || [x.value]) if (v.parts) out.push(a.name === 'RequestMapping' ? springPlaceholders(v.parts) : v.parts);
   }
   return out.length ? out : undefined;
 }
@@ -80,6 +84,11 @@ function declsOf(P, fam) {
     const sets = {};
     for (const [k, v] of c.fields) { const m = /^(?:Db|I?Queryable|IDb)Set<\s*([\w.]+)\s*>/.exec(v); if (m) sets[k] = simpleType(m[1]); }
     if (Object.keys(sets).length) d.dbsets = sets;
+    // Explicit table mappings: [Table("x")] on the class, and EF fluent Entity<T>().ToTable("x") inside a DbContext.
+    const ta = c.anns.find((a) => a.name === 'Table' || a.name === 'TableAttribute');
+    const tn = ta && (ta.args.find((x) => !x.name || x.name === 'name')?.value.parts || []).map((p) => p.lit).join('');
+    if (tn) d.table = tn;
+    if (d.dbsets && c.body >= 0) for (const m of P.src(c.body, c.bodyEnd).matchAll(/Entity<\s*([\w.]+)\s*>\s*\(\s*\)[\s\S]{0,160}?\.ToTable\(\s*"([\w.]+)"/g)) (d.toTables ||= {})[simpleType(m[1])] = m[2];
     out.push(d);
     for (const m of c.methods || []) {
       if (m.isCtor) continue;
@@ -107,7 +116,8 @@ export function routeConfig(rel, text) {
   const keep = (k, v, line) => {
     v = String(v).trim().replace(/^['"]|['"]$/g, '');
     if (!/^\/[\w\-./{}]*$/.test(v) && v !== '') return;
-    if (CONFIG_KEYS.test(k) || (/(path|prefix|base|route|url)$/i.test(k) && v.startsWith('/') && !SECRETISH.test(k))) map[k] = { value: v, line };
+    // Any non-secret key with a path-shaped value: placeholders such as ${app.paths.admin} reference arbitrary keys.
+    if (CONFIG_KEYS.test(k) || (v.startsWith('/') && !SECRETISH.test(k))) map[k] = { value: v, line };
   };
   if (/\.properties$/.test(rel)) {
     text.split(/\r?\n/).forEach((l, i) => { const m = /^\s*([\w.\-[\]]+)\s*[=:]\s*(.*)$/.exec(l); if (m && !l.trim().startsWith('#')) keep(m[1], m[2], i + 1); });

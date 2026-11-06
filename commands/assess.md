@@ -12,7 +12,7 @@ Run **workflow C (existing project assessment)**. Focus: $ARGUMENTS
 Project status:
 !`node "${CLAUDE_PLUGIN_ROOT}/scripts/rmc.mjs" status 2>&1 | head -12`
 
-Model routing: before each step, run `rmc route --agent <role> --category <category> --workflow <slug> [--signals …] [--handoff <H-id of the previous step>]` and pass its `model`. Each step is routed on its own, so the same role can get a different model for a different step. See *Model routing* in the `team-workflows` skill.
+Model routing: before each step, run `rmc route --agent <role> --category <category> --workflow <slug> --session-model <your model id> [--signals …] [--handoff <H-id of the previous step>]`, show the user its `Notice:` line exactly as printed, and pass its `model`. Each step is routed on its own, so the same role can get a different model for a different step. See *Model routing* in the `team-workflows` skill.
 
 Follow workflow C in the `team-workflows` skill.
 1. Run `rmc init`, or `rmc refresh` if already initialized. If `context/architecture.md` is missing, delegate to **architecture** to write the context notes.
@@ -24,6 +24,6 @@ Follow workflow C in the `team-workflows` skill.
 7. If the user asked for `quick`, run steps 1, 4 and 5 only and say what was skipped.
 8. Run `rmc validate` and `rmc viewer`. Summarise findings per role and the top risks, separating verified facts from inferences.
 
-Steps 4 and 5 are independent and may run in parallel. Everything else is sequential.
+Run every step in order, one agent at a time, even though steps 4 and 5 are independent (run them in parallel only if the user explicitly asks).
 
-Delegation rules: follow the `team-workflows` skill. Pass the `model` from `rmc route` when you delegate. If it fails because the model is unavailable, retry once with your own model alias. If the agent shows the task is harder than classified, escalate once with `rmc route --escalate <R-id> --reason "<new evidence>" --handoff <H-id>` instead of restarting the work. In the delegation prompt, include the user's request verbatim, the exact `rmc` command line above, relevant ids and paths from `rmc find`, and related hand-off ids. Do not spawn other roles unless this command says to.
+Delegation rules: follow the `team-workflows` skill. Run every agent in the foreground: never set `run_in_background`, wait for its result, and delegate one agent at a time (never in parallel unless the user explicitly asks). Afterwards, report the model that actually ran from the `[RM CONTEXT] Delegation check` note; never present the requested model as the one that ran. Pass the `model` from `rmc route` when you delegate. If it fails because the model is unavailable, retry once with your own model alias. If the agent shows the task is harder than classified, escalate once with `rmc route --escalate <R-id> --reason "<new evidence>" --handoff <H-id>` instead of restarting the work. In the delegation prompt, include the user's request verbatim, the exact `rmc` command line above, relevant ids and paths from `rmc find`, and related hand-off ids. Do not spawn other roles unless this command says to.

@@ -417,7 +417,7 @@ function drawDocument(d) {
   renderMermaid(page());
 }
 function drawDocuments(route) {
-  if (!DOCS.length) return showPage(header('Technical Documents') + empty('No documents yet. Create one with <code>/rm-context:document</code>.'));
+  if (!DOCS.length) return showPage(header('Technical Documents') + empty('No documents yet. Create one with <code>/rmc:document</code>.'));
   const open = route?.params.get('d') && DOCS.find((d) => d.id === route.params.get('d'));
   if (open) return drawDocument(open);
   const types = [...new Set(DOCS.map((d) => d.type))].sort();

@@ -13,8 +13,29 @@
 - Manifests: `pom.xml`, `build.gradle(.kts)` and `.csproj` dependencies. Rust (`rs`) files are indexed. Spring/Quarkus/Micronaut application config is read for path keys only; secret-like keys are never stored.
 - Frameworks in other languages (Express, Koa, Hono, Next.js, NestJS, Fastify, Nuxt, AdonisJS, Laravel, Symfony, Slim, CodeIgniter, FastAPI, Flask, Django, DRF, Gin, Echo, Fiber, Chi, gorilla/mux, net/http, Rails, Sinatra, Axum, Actix, Rocket) are recognised and reported with an honest status. Their routes still come from the existing pattern extractor.
 
+- **`/rmc` command namespace.** The plugin id is now `rmc`: commands are `/rmc:<name>`, agents `rmc:<agent>`, skills `rmc:<skill>`. The CLI (`rmc`), the marketplace (`rm-context-marketplace`) and `.rmcontext/` are unchanged. Upgrade: uninstall `rm-context@rm-context-marketplace`, install `rmc@rm-context-marketplace` (no alias is possible; keeping both runs every hook twice).
+- **Foreground delegation guard (Claude Code hooks).** `PreToolUse` denies `rmc:*` agents with `run_in_background` and a second `rmc:*` agent while one is running (opt out per project with `delegation.background = "allow"`). `PostToolUse` reads the subagent transcript and reports the model that actually ran and Claude Code's `requestShape`; when it cannot be read, the main session is told not to claim the switch. Delegations are logged as metadata only.
+- **Delegation notices.** `rmc route --session-model <model>` prints `Notice: Perpindahan ke model <Model>, karena bertugas sebagai <Role>.`, or a no-switch notice when the subagent uses the main session's model. `routing.noticeLanguage`: `id` (default) or `en`. Commands and the team-workflows skill show it before delegating and run roles one at a time.
+
+### Fixed (independent QA re-run, TC-002)
+- Agent edges on C#/Java/Kotlin methods were orphaned after the switch to class-qualified ids, and unchanged files kept stale extraction (mixed ids, B3 not applied). `EXTRACTOR_VERSION` 5 re-reads every file once, and old `file#method` ids are remapped to the single `file#Class.method` (reported as `functionIdChanges`).
+- Actions inherited by a Spring controller whose prefix uses `${…}` kept the raw placeholder and were marked verified.
+- EF Core mappings missed PascalCase schema tables (`CREATE TABLE Invoices`); table matching is now case-insensitive and skips tables that differ only by case.
+- Entity → table conventions are per framework, exact, inferred and carry their reason in the evidence `ref`: JPA singular snake_case, Laravel/Rails plural snake_case, Django `<app>_<model>`; SQLAlchemy without `__tablename__` gets no edge. Explicit names (`$table`, `@Table`, `__tablename__`, `[Table]`, `ToTable`) are verified and exact. JPA entities no longer link to a pluralised table.
+
+### Fixed (independent QA, TC-001)
+- Spring profile files (`application-<profile>.yml`) no longer override the default configuration; their values are recorded as conditional alternatives (`attrs.conditional`).
+- Java/C# actions with generic, nested, qualified, array or `object` return types, or named `list`/`select`/`export`/…, were dropped.
+- JAX-RS sub-resource classes are composed through their locator's return type (inferred) instead of appearing as verified root routes.
+- Agent edges on routes whose id changes are remapped by declaration identity (`attrs.declKeys`), including multi-prefix controllers and path arrays.
+- Partial C# controllers take the `[Route]` of their other part; without one the route is partial/inferred.
+- Actions inherited from abstract base controllers (ASP.NET Core, Spring) are listed for each derived controller.
+- `${placeholder}` keys resolve regardless of their name; entity → table links in the C#/Java linker come only from `[Table]`, `ToTable` or the DbSet name.
+- Path parameters with nested-brace constraints; clearer reason for local variables in route templates.
+
 ### Changed
-- `EXTRACTOR_VERSION` 4: the next refresh re-reads every file once.
+- C#/Java/Kotlin method nodes are class-qualified: `function:<file>#Class.method`.
+- `EXTRACTOR_VERSION` 5: the next refresh re-reads every file once.
 - C# and Java methods are indexed as `function` nodes (`file#Method`, with `@line` when a name repeats in a file).
 
 ## 0.4.1 — 2026-11-06

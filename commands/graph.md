@@ -13,4 +13,4 @@ allowed-tools: Bash(node:*)
    - legend chips filter node types; confidence chips filter verified, inferred and manual
    - clicking a node shows its evidence and relationships; "Show change impact" highlights the blast radius
    - `/` searches
-4. Note that it is a snapshot: re-run after `/rm-context:refresh`.
+4. Note that it is a snapshot: re-run after `/rmc:refresh`.

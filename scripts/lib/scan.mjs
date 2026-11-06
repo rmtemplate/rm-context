@@ -7,7 +7,7 @@ import { extract } from './extract.mjs';
 import { loadGraph, saveGraph, migrateGraph, edgeId, stats } from './graph.mjs';
 import { resolveRoutes } from './routes/resolve.mjs';
 
-const EXTRACTOR_VERSION = 4;
+const EXTRACTOR_VERSION = 5;
 const CODE_LANGS = new Set(['js', 'php', 'py', 'go', 'java', 'rb', 'cs', 'rs', 'sql', 'prisma', 'manifest']);
 const JS_EXT = ['', '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.vue', '.svelte', '/index.ts', '/index.tsx', '/index.js', '/index.jsx'];
 const NODE_BUILTINS = new Set('assert buffer child_process cluster crypto dgram dns events fs http http2 https net os path perf_hooks process querystring readline stream string_decoder timers tls tty url util v8 vm worker_threads zlib'.split(' '));
@@ -143,6 +143,7 @@ export function buildScanGraph(cache, project) {
   // Pass 1: files, modules, declarations, tables.
   const declIndex = new Map(); // file → name → id
   const declList = []; // every declaration with its node id (for typed relationships)
+  const entityTables = new Map(); // entity name → table id, from declaration extractors
   const tables = new Map(); // lowercased table name → id
   for (const rel of files) {
     const x = cache[rel].x;
@@ -158,9 +159,11 @@ export function buildScanGraph(cache, project) {
       const names = new Map();
       for (const d of x.decls || []) {
         if (d.type === 'entity') continue;
-        let id = `${d.type}:${rel}#${d.name}`;
+        // Methods of C#/Java/Kotlin classes are class-qualified (file#Class.method), so same-named methods of different classes never share an id.
+        const qn = d.type === 'function' && d.cls ? `${d.cls}.${d.name}` : d.name;
+        let id = `${d.type}:${rel}#${qn}`;
         if (nodes.has(id)) id = `${id}@${d.line}`;
-        node(id, d.type, d.name, ev(rel, d.line, d.end, 'declaration'));
+        node(id, d.type, qn, ev(rel, d.line, d.end, 'declaration'));
         edge(id, fid, 'belongs_to', ev(rel, d.line, d.end, 'declaration'));
         if (!names.has(d.name)) names.set(d.name, id);
         declList.push({ ...d, id, rel });
@@ -216,13 +219,19 @@ export function buildScanGraph(cache, project) {
         if (target && nodes.get(target)?.type === 'function') edge(fid, target, 'calls', ev(rel, line, line, 'call', 'inferred'), 'inferred');
       }
     }
+    const ordinals = new Map();
     for (const r of routesByFile.get(rel) || []) {
       const id = `api:${r.method} ${r.path}`;
       const conf = r.confidence;
       const rev = ev(rel, r.line, r.end, 'route', conf);
+      // Declaration identity, stable across prefix changes: file, line, method, controller.handler, local template and the
+      // ordinal among routes that share all of these (multiple class prefixes, path arrays). Used to remap agent edges.
+      const dk = `${rel}:${r.line}:${r.method}:${r.controller || ''}.${r.handler || ''}:${r.template ?? ''}`;
+      const ord = ordinals.get(dk) || 0;
+      ordinals.set(dk, ord + 1);
       const prev = nodes.get(id);
-      if (prev) { prev.evidence.push(rev); prev.attrs.declarations = (prev.attrs.declarations || 1) + 1; if (conf === 'verified') prev.confidence = 'verified'; }
-      else node(id, 'api', `${r.method} ${r.path}`, rev, { confidence: conf, attrs: routeAttrs(r) });
+      if (prev) { prev.evidence.push(rev); prev.attrs.declarations = (prev.attrs.declarations || 1) + 1; (prev.attrs.declKeys ||= []).push(`${dk}#${ord}`); if (conf === 'verified') prev.confidence = 'verified'; }
+      else node(id, 'api', `${r.method} ${r.path}`, rev, { confidence: conf, attrs: { ...routeAttrs(r), declKeys: [`${dk}#${ord}`] } });
       edge(fid, id, 'implements', rev, conf);
       if (r.handler && x.lang !== 'php' && r.handler !== 'lambda') {
         const [cls, name] = r.handler.includes('.') ? r.handler.split('.').slice(-2) : [r.controller, r.handler];
@@ -254,10 +263,8 @@ export function buildScanGraph(cache, project) {
       node(id, 'entity', d.name, ev(rel, d.line, d.line, 'declaration'));
       const cls = declIndex.get(rel)?.get(d.name);
       if (cls) edge(cls, id, 'implements', ev(rel, d.line, d.line, 'declaration'));
-      const explicit = x.meta?.modelTable;
-      const conv = d.name.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase();
-      const target = explicit ? tableFor(explicit) : tableFor(conv) || tableFor(conv + 's');
-      if (target) edge(id, target, 'depends_on', ev(rel, d.line, d.line, 'declaration', explicit ? 'verified' : 'inferred'));
+      const m = entityMapping(x, rel, d, tables);
+      if (m) { edge(id, m.table, 'depends_on', { ...ev(rel, d.line, d.line, 'declaration', m.confidence), ref: m.why }, m.confidence); entityTables.set(d.name, m.table); }
     }
     for (const h of x.http || []) {
       const id = `integration:${h.host}`;
@@ -279,7 +286,7 @@ export function buildScanGraph(cache, project) {
       }
     }
   }
-  linkTypedCode(declList, typedLinks, { node, edge, ev, nodes, tableFor });
+  linkTypedCode(declList, typedLinks, { node, edge, ev, nodes, entityTables });
 
   // Nginx proxy_pass → compose service with the same hostname.
   for (const rel of files) for (const i of cache[rel].x?.infra || []) for (const p of i.proxies || []) {
@@ -302,7 +309,7 @@ export function buildScanGraph(cache, project) {
 function routeAttrs(r) {
   const a = { method: r.method, path: r.path, language: r.language, framework: r.framework, kind: r.kind, originalTemplate: r.template, controller: r.controller, handler: r.handler,
     parameters: r.params, requestBody: r.requestBody, responseType: r.responseType, consumes: r.consumes, produces: r.produces, auth: r.auth, apiVersion: r.apiVersion,
-    group: r.group, extractionMethod: r.extraction, resolutionStatus: r.status, unresolved: r.unresolved, resolution: r.steps?.length ? r.steps : undefined, note: r.note };
+    group: r.group, extractionMethod: r.extraction, resolutionStatus: r.status, unresolved: r.unresolved, resolution: r.steps?.length ? r.steps : undefined, conditional: r.conditional, note: r.note };
   for (const k of Object.keys(a)) if (a[k] === undefined) delete a[k];
   return a;
 }
@@ -313,14 +320,47 @@ const REPO_BASE = /^(Jpa|Crud|PagingAndSorting|ListCrud|ListPagingAndSorting|Rea
 
 // Handler → service → repository → entity/table, from declared field/parameter types and explicit generic
 // arguments (JpaRepository<User, Long>, DbSet<User>). Never from name similarity. Call links are inferred.
-function linkTypedCode(declList, extra, { node, edge, ev, nodes, tableFor }) {
+// Entity → table for the declaration extractors. An explicit table name is verified; otherwise only the framework's
+// documented default naming is tried (exact name, inferred, with the convention recorded as the reason). Unknown or
+// ambiguous naming strategies produce no edge.
+const snake = (n) => n.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase();
+const plural = (n) => (/[^aeiou]y$/.test(n) ? n.slice(0, -1) + 'ies' : /(s|x|z|ch|sh)$/.test(n) ? n + 'es' : n + 's');
+function entityMapping(x, rel, d, tables) {
+  const explicit = x.meta?.modelTable;
+  if (explicit) { const t = tables.get(explicit.toLowerCase()); return t ? { table: t, confidence: 'verified', why: `explicit table name "${explicit}"` } : null; }
+  let name, why;
+  if (x.lang === 'java') [name, why] = [snake(d.name), 'JPA default naming (Spring Boot): snake_case of the entity class name']; 
+  else if (x.lang === 'php') [name, why] = [plural(snake(d.name)), 'Laravel Eloquent default: plural snake_case of the model name'];
+  else if (x.lang === 'rb') [name, why] = [plural(snake(d.name)), 'Rails Active Record default: plural snake_case of the model name'];
+  else if (x.lang === 'py' && d.orm === 'django') {
+    const app = /(?:^|\/)(\w+)\/models(?:\.py$|\/)/.exec(rel)?.[1];
+    if (app) [name, why] = [`${app}_${d.name.toLowerCase()}`, 'Django default: <app_label>_<model name in lower case>'];
+  }
+  const t = name && tables.get(name);
+  return t ? { table: t, confidence: 'inferred', why } : null;
+}
+
+function linkTypedCode(declList, extra, { node, edge, ev, nodes, entityTables }) {
   const classes = new Map();
   for (const d of declList) if (d.type === 'class') (classes.get(d.name) || classes.set(d.name, []).get(d.name)).push(d);
   const methodOf = (cls, name) => declList.find((d) => d.type === 'function' && d.cls === cls && d.name === name);
   const baseName = (b) => b.replace(/<.*$/, '');
   const typeArgs = (b) => (/<(.+)>/.exec(b)?.[1] || '').split(',').map((s) => s.trim().split('.').pop()).filter(Boolean);
   const implsOf = (iface) => declList.filter((d) => d.type === 'class' && (d.bases || []).some((b) => baseName(b) === iface));
-  const snake = (n) => n.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase();
+  // Entity → table only from mapping evidence, never from a similar name:
+  //   [Table("x")] on the entity class (verified), Entity<T>().ToTable("x") in a DbContext (verified),
+  //   or the EF Core default: the table is named after the DbSet<T> property (inferred, exact name match only).
+  const entityTable = new Map(entityTables); // entity → table already mapped by the declaration extractors (@Table, $table, …)
+  // Table ids keep the schema casing (table:Invoices); match case-insensitively, and not at all when two tables differ only by case.
+  const tableIds = new Map();
+  for (const id of nodes.keys()) if (id.startsWith('table:')) tableIds.set(id.toLowerCase(), [...(tableIds.get(id.toLowerCase()) || []), id]);
+  const exactTable = (n) => { const l = tableIds.get(`table:${String(n).toLowerCase()}`); return l?.length === 1 ? l[0] : null; };
+  const mapTable = (entity, table, evc, confidence) => {
+    const t = exactTable(table);
+    if (!t || entityTable.has(entity)) return;
+    entityTable.set(entity, t);
+    edge(`entity:${entity}`, t, 'depends_on', evc, confidence);
+  };
   const entityId = (name, why) => {
     const id = `entity:${name}`;
     if (nodes.has(id)) return id;
@@ -328,8 +368,7 @@ function linkTypedCode(declList, extra, { node, edge, ev, nodes, tableFor }) {
     if (!decl) return null;
     node(id, 'entity', name, ev(decl.rel, decl.line, decl.line, 'declaration'), { attrs: { basis: why } });
     edge(decl.id, id, 'implements', ev(decl.rel, decl.line, decl.line, 'declaration'));
-    const t = tableFor(snake(name)) || tableFor(name);
-    if (t) edge(id, t, 'depends_on', ev(decl.rel, decl.line, decl.line, 'declaration', 'inferred'), 'inferred');
+    if (decl.table && classes.get(name).length === 1) mapTable(name, decl.table, { ...ev(decl.rel, decl.line, decl.line, 'declaration'), ref: `[Table("${decl.table}")] on ${name}` }, 'verified');
     return id;
   };
   const repoEntity = (cls) => {
@@ -337,7 +376,7 @@ function linkTypedCode(declList, extra, { node, edge, ev, nodes, tableFor }) {
     for (const b of cls.bases || []) { const parent = classes.get(baseName(b))?.[0]; if (parent && parent !== cls) for (const pb of parent.bases || []) if (REPO_BASE.test(baseName(pb))) return typeArgs(pb)[0]; }
     return null;
   };
-  const dataTarget = (entity) => tableFor(snake(entity)) || tableFor(entity) || `entity:${entity}`;
+  const dataTarget = (entity) => entityTable.get(entity) || `entity:${entity}`;
   const access = (source, entity, method, evc) => {
     const mode = WRITE_RE.test(method) ? 'writes_to' : READ_RE.test(method) ? 'reads_from' : null;
     const t = dataTarget(entity);
@@ -346,6 +385,8 @@ function linkTypedCode(declList, extra, { node, edge, ev, nodes, tableFor }) {
   for (const c of declList) {
     if (c.type !== 'class') continue;
     for (const t of new Set(Object.values(c.dbsets || {}))) { const e = entityId(t, `DbSet<${t}> in ${c.name}`); if (e) edge(c.id, e, 'depends_on', ev(c.rel, c.line, c.end, 'declaration')); }
+    for (const [t, table] of Object.entries(c.toTables || {})) if (entityId(t, `ToTable in ${c.name}`)) mapTable(t, table, { ...ev(c.rel, c.line, c.end, 'declaration'), ref: `Entity<${t}>().ToTable("${table}") in ${c.name}` }, 'verified');
+    for (const [prop, t] of Object.entries(c.dbsets || {})) if (!c.toTables?.[t]) mapTable(t, prop, { ...ev(c.rel, c.line, c.end, 'declaration', 'inferred'), ref: `EF Core default: table named after the DbSet property ${prop}` }, 'inferred');
     const re = (c.bases || []).some((b) => REPO_BASE.test(baseName(b))) ? repoEntity(c) : null;
     if (re) { const e = entityId(re, `repository type argument in ${c.name}`); if (e) edge(c.id, e, 'depends_on', ev(c.rel, c.line, c.line, 'declaration')); }
   }
@@ -457,7 +498,26 @@ export function scan(root, { full = false, only = null } = {}) {
   const newApiAt = new Map();
   for (const n of scanned.nodes) if (n.type === 'api' && evKey(n)) newApiAt.set(evKey(n), [...(newApiAt.get(evKey(n)) || []), n.id]);
   const remap = new Map();
-  for (const o of oldScan.values()) if (o.type === 'api' && !scanIds.has(o.id)) { const to = newApiAt.get(evKey(o)) || []; const m = to.filter((id) => id.split(' ')[0] === o.id.split(' ')[0]); if (m.length === 1) { remap.set(o.id, m[0]); routeIdChanges.push({ from: o.id, to: m[0] }); } }
+  // A vanished api id moves to a new id only when the declaration identity matches exactly one new route; otherwise the
+  // agent edges are reported as orphaned rather than attached to a guess.
+  const byDeclKey = new Map();
+  for (const n of scanned.nodes) if (n.type === 'api' && !oldScan.has(n.id)) for (const k of n.attrs?.declKeys || []) byDeclKey.set(k, [...(byDeclKey.get(k) || []), n.id]);
+  for (const o of oldScan.values()) {
+    if (o.type !== 'api' || scanIds.has(o.id)) continue;
+    let m = [...new Set((o.attrs?.declKeys || []).flatMap((k) => byDeclKey.get(k) || []))];
+    if (!o.attrs?.declKeys) m = (newApiAt.get(evKey(o)) || []).filter((id) => id.split(' ')[0] === o.id.split(' ')[0]); // graphs written before declKeys
+    if (m.length === 1) { remap.set(o.id, m[0]); routeIdChanges.push({ from: o.id, to: m[0] }); }
+  }
+  // Method ids became class-qualified (file#method → file#Class.method): an old id moves to the single new method of that
+  // name in the same file; with zero or several candidates its agent edges are reported as orphaned instead of guessed.
+  const functionIdChanges = [];
+  const newFn = new Map();
+  for (const n of scanned.nodes) { const m = n.type === 'function' && !oldScan.has(n.id) && /^function:(.+)#\w+\.(\w+)$/.exec(n.id); if (m) newFn.set(`${m[1]}#${m[2]}`, [...(newFn.get(`${m[1]}#${m[2]}`) || []), n.id]); }
+  for (const o of oldScan.values()) {
+    if (o.type !== 'function' || scanIds.has(o.id) || !/^function:.+#\w+$/.test(o.id)) continue;
+    const m = newFn.get(o.id.slice(9));
+    if (m?.length === 1) { remap.set(o.id, m[0]); functionIdChanges.push({ from: o.id, to: m[0] }); }
+  }
   for (const n of scanned.nodes) { const o = oldScan.get(n.id) || [...remap].filter(([, to]) => to === n.id).map(([from]) => oldScan.get(from))[0]; if (o?.description) n.description = o.description; if (o?.tags) n.tags = o.tags; }
   for (const e of old.edges) if (e.origin !== 'scan' && (remap.has(e.source) || remap.has(e.target))) { e.source = remap.get(e.source) || e.source; e.target = remap.get(e.target) || e.target; e.id = `${e.source}|${e.type}|${e.target}`; }
   const nodes = [...scanned.nodes, ...agentNodes.filter((n) => !scanIds.has(n.id))];
@@ -492,7 +552,7 @@ export function scan(root, { full = false, only = null } = {}) {
     files: { indexed: Object.keys(cache).length, added: added.length, changed: changed.length, deleted: deleted.length },
     changedFiles: [...added, ...changed, ...deleted].slice(0, 200),
     excluded: { ...excluded, binaryContent: skippedBinary },
-    graph: stats(graph), staleAgentItems: staleCount, orphanedAgentEdges: orphaned, migration, routeIdChanges,
+    graph: stats(graph), staleAgentItems: staleCount, orphanedAgentEdges: orphaned, migration, routeIdChanges, functionIdChanges,
     routes: scanned.routeReport,
     limitations: [
       'Routes: structural extraction (no type checker). Prefixes from constants, groups, base classes, config and call sites are resolved where statically known; anything else is reported per route as unresolved (see routes[] and api attrs.unresolved). Reflection and runtime registration are not detected.',

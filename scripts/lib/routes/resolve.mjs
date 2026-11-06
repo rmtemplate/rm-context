@@ -14,6 +14,7 @@ export function resolveRoutes(cache) {
   const classPrefix = new Map();
   const callSites = new Map();
   const conventions = [], appPaths = [], configs = [];
+  const locators = new Map(), ctrlClasses = new Map(), usedLocators = new Set();
   const deps = [];
   for (const rel of files) {
     const x = cache[rel].x;
@@ -26,15 +27,24 @@ export function resolveRoutes(cache) {
     for (const s of x.routeCalls || []) (callSites.get(s.fn) || callSites.set(s.fn, []).get(s.fn)).push({ ...s, file: rel });
     for (const c of x.routeConv || []) conventions.push({ ...c, file: rel });
     for (const a of x.routeApp || []) appPaths.push({ ...a, file: rel });
-    if (x.routeConfig) configs.push({ file: rel, root: configRoot(rel), map: x.routeConfig });
+    for (const l of x.routeLocators || []) (locators.get(l.type) || locators.set(l.type, []).get(l.type)).push({ ...l, file: rel });
+    for (const c of x.routeCtrls || []) (ctrlClasses.get(c.name) || ctrlClasses.set(c.name, []).get(c.name)).push({ ...c, file: rel });
+    if (x.routeConfig) configs.push({ file: rel, root: configRoot(rel), map: x.routeConfig, ...configKind(rel) });
     for (const d of x.deps || []) deps.push(d.name);
   }
   const quarkus = deps.some((d) => /quarkus/i.test(d));
 
+  // Default configuration only (application.properties beats application.yml, application beats bootstrap, nearest module first).
+  // Profile-specific files (application-<profile>.yml) are never assumed active: they are returned as conditional alternatives.
   const nearestConfig = (rel, key) => {
-    const hits = configs.filter((c) => c.map[key] && (c.root === '' || rel.startsWith(c.root + '/'))).sort((a, b) => b.root.length - a.root.length);
-    return hits[0] ? { value: hits[0].map[key].value, file: hits[0].file, line: hits[0].map[key].line } : null;
+    const inScope = configs.filter((c) => c.map[key] && (c.root === '' || rel.startsWith(c.root + '/')));
+    const hits = inScope.filter((c) => !c.profile).sort((a, b) => b.root.length - a.root.length || a.rank - b.rank || a.file.localeCompare(b.file));
+    const hit = hits[0] ? { value: hits[0].map[key].value, file: hits[0].file, line: hits[0].map[key].line } : null;
+    const conditional = inScope.filter((c) => c.profile && c.root === (hits[0]?.root ?? c.root) && c.map[key].value !== hit?.value)
+      .map((c) => ({ profile: c.profile, key, value: c.map[key].value, file: c.file, line: c.map[key].line }));
+    return hit || conditional.length ? { ...(hit || {}), found: !!hit, conditional } : null;
   };
+  const profileNote = (cond) => cond.map((c) => `profile '${c.profile}' sets ${c.key} = "${c.value}" (${c.file}:${c.line}); not applied, the active profile is unknown`);
   const near = (list, rel) => list.slice().sort((a, b) => common(b.file, rel) - common(a.file, rel));
 
   // Resolve one part into alternatives: [{ parts, steps, exact }]
@@ -43,9 +53,11 @@ export function resolveRoutes(cache) {
     if (p.ref?.startsWith('config:')) {
       const key = p.ref.slice(7);
       const hit = nearestConfig(ctx.rel, key);
-      if (hit) return [{ parts: [{ lit: hit.value }], steps: [`config ${key} = "${hit.value}" (${hit.file}:${hit.line})`], exact: true }];
-      if (p.fallback !== undefined) return [{ parts: [{ lit: p.fallback }], steps: [`config ${key} not found; placeholder default "${p.fallback}" used`], exact: false }];
-      return [{ parts: [{ ...p, reason: `configuration key ${key} not found in application.properties/yml` }], steps: [], exact: false }];
+      const conditional = hit?.conditional || [];
+      if (hit?.found) return [{ parts: [{ lit: hit.value }], steps: [`config ${key} = "${hit.value}" (${hit.file}:${hit.line})`, ...profileNote(conditional)], exact: true, conditional }];
+      const where = conditional.length ? `defined only in profile-specific configuration (${conditional.map((c) => `${c.profile}: "${c.value}"`).join(', ')}); the active profile is unknown` : 'not found among the path-valued keys of the default application.properties/yml';
+      if (p.fallback !== undefined) return [{ parts: [{ lit: p.fallback }], steps: [`config ${key} ${where}; placeholder default "${p.fallback}" used`, ...profileNote(conditional)], exact: false, conditional }];
+      return [{ parts: [{ ...p, reason: `configuration key ${key} ${where}` }], steps: profileNote(conditional), exact: false, conditional }];
     }
     if (p.ref) {
       let hits = [];
@@ -92,6 +104,24 @@ export function resolveRoutes(cache) {
       for (const pre of b.prefixes) for (const alt of resolveExpr(pre, { ...ctx, rel: b.file }, depth + 1)) out.push({ parts: alt.parts, steps: [`prefix inherited from ${p.base} (${b.file}:${b.line})`, ...alt.steps], exact: alt.exact });
       return out;
     }
+    if (p.partialOf) {
+      const others = (classPrefix.get(p.partialOf) || []).filter((c) => c.prefixes && c.file !== ctx.rel);
+      if (!others.length) return [{ parts: [{ dyn: `partial class ${p.partialOf}`, reason: `this part of partial class ${p.partialOf} has no [Route] and no other part declaring one was found` }], steps: [], exact: false }];
+      const out = [];
+      for (const o of others) for (const pre of o.prefixes) for (const alt of resolveExpr(pre, { ...ctx, rel: o.file }, depth + 1))
+        out.push({ parts: alt.parts, steps: [`prefix from another part of partial class ${p.partialOf} (${o.file}:${o.line})`, ...alt.steps], exact: alt.exact && others.length === 1, conditional: alt.conditional });
+      return out;
+    }
+    if (p.locator) {
+      // JAX-RS sub-resource: the prefix is the path of the locator method(s) whose declared return type is this class.
+      usedLocators.add(p.locator);
+      const hits = locators.get(p.locator) || [];
+      if (!hits.length) return [{ parts: [{ dyn: `sub-resource ${p.locator}`, reason: `${p.locator} has no class @Path and no locator method returning it was found` }], steps: [], exact: false }];
+      const out = [];
+      for (const h of hits) for (const alt of resolveExpr(h.expr, { ...ctx, rel: h.file }, depth + 1))
+        out.push({ parts: alt.parts, steps: [`sub-resource of ${h.owner}.${h.method} (${h.file}:${h.line}), composed through its declared return type`, ...alt.steps], exact: false, conditional: alt.conditional });
+      return out;
+    }
     return [{ parts: [p], steps: [], exact: !p.dyn && !p.soft }];
   }
   function resolveExpr(expr, ctx, depth = 0) {
@@ -99,7 +129,7 @@ export function resolveRoutes(cache) {
     for (const p of expr) {
       const options = resolvePart(p, ctx, depth);
       const next = [];
-      for (const a of alts) for (const o of options) if (next.length < MAX_ALTS) next.push({ parts: [...a.parts, ...o.parts], steps: [...a.steps, ...o.steps], exact: a.exact && o.exact });
+      for (const a of alts) for (const o of options) if (next.length < MAX_ALTS) next.push({ parts: [...a.parts, ...o.parts], steps: [...a.steps, ...o.steps], exact: a.exact && o.exact, conditional: [...(a.conditional || []), ...(o.conditional || [])] });
       alts = next;
     }
     return alts;
@@ -110,13 +140,36 @@ export function resolveRoutes(cache) {
     const steps = [];
     let parts = [], exact = true;
     const cfgKeys = { spring: ['server.servlet.context-path', 'server.context-path', 'spring.mvc.servlet.path', 'spring.webflux.base-path'], 'jax-rs': ['quarkus.http.root-path', 'quarkus.rest.path', 'quarkus.resteasy.path'], micronaut: ['micronaut.server.context-path'] }[f.framework] || [];
-    for (const k of cfgKeys) { const hit = nearestConfig(rel, k); if (hit && hit.value && hit.value !== '/') { parts = join(parts, [{ lit: hit.value }]); steps.push(`application prefix ${k} = "${hit.value}" (${hit.file}:${hit.line})`); } }
+    const conditional = [];
+    for (const k of cfgKeys) {
+      const hit = nearestConfig(rel, k);
+      if (!hit) continue;
+      if (hit.found && hit.value && hit.value !== '/') { parts = join(parts, [{ lit: hit.value }]); steps.push(`application prefix ${k} = "${hit.value}" (${hit.file}:${hit.line})`); }
+      conditional.push(...hit.conditional); steps.push(...profileNote(hit.conditional));
+    }
     if (f.framework === 'jax-rs') {
       const ap = near(appPaths.filter((a) => a.framework === 'jax-rs'), rel)[0];
       if (ap) { parts = join(parts, [{ lit: ap.path }]); steps.push(`@ApplicationPath("${ap.path}") (${ap.file}:${ap.line})`); }
       else if (!quarkus) { exact = false; steps.push('no @ApplicationPath found; application root assumed (a web.xml servlet mapping may add a prefix)'); }
     }
-    return { parts, steps, exact };
+    return { parts, steps, exact, conditional };
+  }
+
+  // Controllers whose declared base chain (by simple type name, through routeClasses) reaches `base`. Ambiguous names are skipped.
+  function derivedControllers(base) {
+    const out = [];
+    if ((classPrefix.get(base) || []).length > 1) return out;
+    for (const [name, list] of ctrlClasses) {
+      if (list.length !== 1 || name === base) continue;
+      let cur = [name], hit = false;
+      const seen = new Set(cur);
+      for (let i = 0; i < 8 && cur.length && !hit; i++) {
+        cur = cur.flatMap((n) => (classPrefix.get(n) || []).flatMap((c) => c.bases || [])).filter((n) => !seen.has(n) && seen.add(n));
+        hit = cur.includes(base);
+      }
+      if (hit) out.push(list[0]);
+    }
+    return out;
   }
 
   const fnDecls = new Map();
@@ -136,8 +189,17 @@ export function resolveRoutes(cache) {
     for (const fw of x.frameworks || []) rep(fw.id, lang).files.add(rel);
     for (const [fw, s] of Object.entries(x.routeStats || {})) { const r = rep(fw, lang); r.controllers += s.controllers || 0; r.registrations += s.registrations || 0; }
     for (const i of x.routeIssues || []) { const r = rep(i.framework || 'unknown', lang); r.unsupported++; if (r.issues.length < 25) r.issues.push({ file: rel, line: i.line, pattern: i.pattern, reason: i.reason }); }
-    for (const f of x.routes || []) {
+    for (const f0 of x.routes || []) {
       const finals = [];
+      // Abstract base actions are instantiated once per derived controller (structural inheritance by declared base type).
+      const insts = f0.abstractBase ? derivedControllers(f0.controller) : [null];
+      if (f0.abstractBase && !insts.length) { const r = rep(f0.framework, f0.language || lang); r.unsupported++; if (r.issues.length < 25) r.issues.push({ file: rel, line: f0.line, pattern: 'abstract base controller', reason: `${f0.controller}.${f0.handler} is declared on an abstract class and no derived controller was found` }); continue; }
+      let f = f0;
+      for (const d of insts) {
+      if (d && d.methods.includes(f0.handler)) continue; // overridden in the derived controller: its own declaration counts
+      const start = finals.length;
+      const own = f0.expr || (f0.path ? [{ lit: f0.path }] : []);
+      f = d ? { ...f0, controller: d.name, expr: f0.absolute ? own : join([{ base: d.name }], own) } : f0;
       if (f.conventional) {
         const tpl = conventions.find((c) => c.framework === f.framework && /\{controller/.test(c.template) && (c.kind === 'webapi' || /\{action/.test(c.template)));
         if (!tpl) { const r = rep(f.framework, f.language || lang); r.unsupported++; if (r.issues.length < 25) r.issues.push({ file: rel, line: f.line, pattern: 'conventional routing', reason: `${f.controller}.${f.handler} has no attribute route and no conventional route template was found` }); continue; }
@@ -155,9 +217,12 @@ export function resolveRoutes(cache) {
           for (const alt of resolveExpr(expr, { rel, fnDecls })) {
             let full = app.parts.length ? join(app.parts, alt.parts) : alt.parts;
             if (/^aspnet/.test(f.framework || '')) full = aspnetTokens(full, f.controller, f.handler);
-            finals.push({ ...refact(f, full), steps: [...app.steps, ...alt.steps], exact: alt.exact && app.exact && f.exact !== false });
+            const conditional = [...app.conditional, ...(alt.conditional || [])];
+            finals.push({ ...refact(f, full), steps: [...app.steps, ...alt.steps], exact: alt.exact && app.exact && f.exact !== false, ...(conditional.length ? { conditional } : {}) });
           }
         }
+      }
+      if (d) for (const g of finals.slice(start)) g.steps = [`action ${f0.handler} inherited by ${d.name} (${d.file}:${d.line}) from abstract ${f0.controller} (${rel}:${f0.line})`, ...(g.steps || [])];
       }
       for (const g of finals) {
         const expr = g.expr || [{ lit: g.path }];
@@ -170,6 +235,8 @@ export function resolveRoutes(cache) {
       }
     }
   }
+  // Locators whose sub-resource class was never seen: reported, never guessed.
+  for (const [type, ls] of locators) if (!usedLocators.has(type)) for (const l of ls) { const r = rep(l.framework, langName(cache[l.file].x, l.file)); r.unsupported++; if (r.issues.length < 25) r.issues.push({ file: l.file, line: l.line, pattern: 'JAX-RS sub-resource locator', reason: `${l.owner}.${l.method} returns sub-resource ${type}, which declares no routes in the indexed files; its nested routes are not listed` }); }
   const byId = new Map(REGISTRY.map((a) => [a.id, a]));
   const summary = [...report.values()].map((r) => {
     const a = byId.get(r.framework);
@@ -185,6 +252,13 @@ function langName(x, rel) {
   return { cs: 'csharp', java: /\.kts?$/.test(rel) ? 'kotlin' : 'java', php: 'php', py: 'python', go: 'go', rb: 'ruby', rs: 'rust', js: /\.(ts|tsx|mts|cts)$/.test(rel) ? 'typescript' : 'javascript' }[x.lang] || x.lang;
 }
 // Spring/Quarkus resource roots apply to the module that contains them: a/b/src/main/resources/x → a/b
+// application-<profile>.yml → { profile }; rank orders default files: application.properties, application.yml, bootstrap.*.
+function configKind(rel) {
+  const m = /^(application|bootstrap)(?:-([\w-]+))?\.(properties|ya?ml)$/.exec(path.posix.basename(rel));
+  if (!m) return { rank: 9 };
+  return { profile: m[2] || undefined, rank: (m[1] === 'bootstrap' ? 2 : 0) + (m[3] === 'properties' ? 0 : 1) };
+}
+
 function configRoot(rel) {
   const i = rel.indexOf('src/main/resources/');
   if (i >= 0) return rel.slice(0, Math.max(0, i - 1));

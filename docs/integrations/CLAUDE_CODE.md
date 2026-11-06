@@ -6,10 +6,10 @@
 
 ```text
 /plugin marketplace add rmtemplate/rm-context
-/plugin install rm-context@rm-context-marketplace
+/plugin install rmc@rm-context-marketplace
 ```
 
-Restart Claude Code when prompted. Commands are available as `/rm-context:<name>`. To update later, run `/plugin marketplace update rm-context-marketplace`.
+Restart Claude Code when prompted. Commands are available as `/rmc:<name>`. Upgrading from a version with `/rm-context:<name>` commands: `claude plugin uninstall rm-context@rm-context-marketplace`, then install `rmc@rm-context-marketplace` (no alias; do not keep both). To update later, run `/plugin marketplace update rm-context-marketplace`.
 
 ## What the adapter contains
 
@@ -19,13 +19,13 @@ Restart Claude Code when prompted. Commands are available as `/rm-context:<name>
 | `agents/*.md` | Nine agents: business-analyst, system-analyst, project-manager, senior-engineer, devops-engineer, architecture, qa, documentation, quick-qa |
 | `skills/*/SKILL.md` | The team contract (`team-workflows`), the role playbooks and the documentation engine. Agents preload them through the `skills` frontmatter |
 | `commands/*.md` | 29 slash commands. Each calls the core CLI through `${CLAUDE_PLUGIN_ROOT}/scripts/rmc.mjs` |
-| `hooks/hooks.json` | Automatic context through four hooks. `SessionStart` adds a compact summary and exports `RMC_CLI` so agents can locate the CLI. `UserPromptSubmit` adds relevant knowledge within a token budget. `PostToolUse` records file changes, and `Stop` runs one incremental refresh. See the README's [Automatic context](../../README.md#automatic-context-claude-code) section. |
+| `hooks/hooks.json` | Automatic context through four hooks. `SessionStart` adds a compact summary and exports `RMC_CLI` so agents can locate the CLI. `UserPromptSubmit` adds relevant knowledge within a token budget. `PostToolUse` records file changes, and `Stop` runs one incremental refresh. A delegation guard on `Agent`/`Task` (`PreToolUse`, `PostToolUse`, `PostToolUseFailure`) keeps `rmc:*` agents in the foreground, one at a time, and reports the model that actually ran from the subagent transcript (see the README's *Foreground delegation and switch notices*). See the README's [Automatic context](../../README.md#automatic-context-claude-code) section. |
 
 ## Agent routing
 
 The agent is chosen in one of these ways:
-- **By the command.** `/rm-context:fsd` goes to the Business Analyst, `/rm-context:erd` to the System Analyst, and so on.
-- **By the template catalog.** `/rm-context:document <type>` goes to the template's owning agent.
+- **By the command.** `/rmc:fsd` goes to the Business Analyst, `/rmc:erd` to the System Analyst, and so on.
+- **By the template catalog.** `/rmc:document <type>` goes to the template's owning agent.
 - **By the category default.** `rmc route --category <c>` returns a default agent for each category.
 - **Step by step in a workflow.** In `discover`, `feature` and `assess`, each step names its role.
 

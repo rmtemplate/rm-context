@@ -1,6 +1,6 @@
 // JVM route adapters (Java and Kotlin).
 import { declarative, registration } from '../strategies.mjs';
-import { fromValue, lit, fact } from '../model.mjs';
+import { fromValue, lit, fact, join } from '../model.mjs';
 import { lineOf } from '../detect.mjs';
 
 const ann = (owner, re) => (owner.anns || []).filter((a) => (typeof re === 'string' ? a.name === re : re.test(a.name)));
@@ -16,7 +16,7 @@ function paths(a, ...names) {
   return list.length ? list.map((e) => springPlaceholders(fromValue(e))) : [[]];
 }
 // "${api.prefix}/users" → config reference resolved from application.properties/yml by the resolver.
-function springPlaceholders(expr) {
+export function springPlaceholders(expr) {
   return expr.flatMap((p) => {
     if (p.lit === undefined || !p.lit.includes('${')) return [p];
     const out = [];
@@ -39,7 +39,7 @@ const SIMPLE = /^(String|Integer|int|Long|long|Boolean|boolean|Double|double|Flo
 const SPRING_VERB = { GetMapping: 'GET', PostMapping: 'POST', PutMapping: 'PUT', PatchMapping: 'PATCH', DeleteMapping: 'DELETE' };
 function spring(P, language) {
   return declarative(P, {
-    framework: 'spring', language, inheritPrefix: true, frameworkBases: new Set(),
+    framework: 'spring', language, inheritPrefix: true, frameworkBases: new Set(), abstractBases: true,
     isController: (c) => !has(c, /^(FeignClient|HttpExchange|RepositoryRestResource)$/) && (has(c, /^(RestController|Controller)$/) || (has(c, 'RequestMapping') && c.kind === 'interface') || ((c.methods || []).some((m) => has(m, /^(Get|Post|Put|Patch|Delete|Request)Mapping$/)) && c.kind === 'interface')),
     classPrefixes: (c) => ann(c, 'RequestMapping').flatMap((a) => paths(a, 'value', 'path')),
     methodRoutes(m, cls) {
@@ -88,6 +88,7 @@ function jaxrs(P, language) {
     framework: 'jax-rs', language, inheritPrefix: false,
     isController: (c) => has(c, 'Path') || (c.methods || []).some((m) => has(m, JAXRS_VERB)),
     classPrefixes: (c) => ann(c, 'Path').flatMap((a) => paths(a, 'value')),
+    subResource: (c) => !has(c, 'Path'),
     methodRoutes(m, cls) {
       const verbs = ann(m, JAXRS_VERB).map((a) => a.name);
       const mp = ann(m, 'Path');
@@ -110,7 +111,20 @@ function jaxrs(P, language) {
 // Sub-resource locators: @Path without an HTTP method annotation.
 function jaxrsIssues(P) {
   const out = [];
-  for (const c of P.classes) for (const m of c.methods || []) if (has(m, 'Path') && !has(m, JAXRS_VERB) && has(c, 'Path')) out.push({ line: m.line, pattern: 'JAX-RS sub-resource locator', reason: `${c.name}.${m.name} returns a sub-resource; its nested routes are not composed` });
+  for (const c of P.classes) for (const m of c.methods || []) if (has(m, 'Path') && !has(m, JAXRS_VERB) && !simpleReturn(m)) out.push({ line: m.line, pattern: 'JAX-RS sub-resource locator', reason: `${c.name}.${m.name} returns a sub-resource of undeclared type; its nested routes are not composed` });
+  return out;
+}
+
+// Sub-resource locators: @Path without an HTTP verb. The declared return type names the sub-resource class.
+const simpleReturn = (m) => { const t = String(m.returnType || '').replace(/<.*$/, '').trim().split('.').pop(); return /^[A-Z]\w*$/.test(t) && !/^(Object|Response|Class)$/.test(t) ? t : null; };
+function jaxrsLocators(P) {
+  const out = [];
+  for (const c of P.classes) for (const m of c.methods || []) {
+    if (!has(m, 'Path') || has(m, JAXRS_VERB) || !simpleReturn(m)) continue;
+    const own = paths(ann(m, 'Path')[0], 'value')[0] || [];
+    const pre = has(c, 'Path') ? ann(c, 'Path').flatMap((a) => paths(a, 'value')) : [[{ locator: c.name }]];
+    for (const p of pre) out.push({ type: simpleReturn(m), expr: join(p, own), owner: c.name, method: m.name, line: m.line });
+  }
   return out;
 }
 
@@ -200,7 +214,7 @@ export default [
   {
     id: 'spring', name: 'Spring MVC / Spring WebFlux (annotations)', language: 'java', langs: ['java'], status: 'supported',
     detect: (F) => imp('org\\.springframework\\.(web\\.bind\\.annotation|stereotype\\.Controller)')(F) || lineOf(F.text, /@(RestController|(Get|Post|Put|Patch|Delete|Request)Mapping)\b/),
-    extract(F) { const r = spring(F.P, F.language); return { routes: r.routes, stats: { controllers: r.controllers }, issues: [] }; },
+    extract(F) { const r = spring(F.P, F.language); return { routes: r.routes, controllerClasses: r.controllerClasses, stats: { controllers: r.controllers }, issues: [] }; },
     patterns: ['@RestController / @Controller', '@RequestMapping on classes and methods (value/path arrays, method = RequestMethod.X)', '@GetMapping/@PostMapping/@PutMapping/@PatchMapping/@DeleteMapping (no-arg, value, path, arrays)', 'class + method composition with every combination of multiple paths', '@PathVariable/@RequestParam/@RequestBody/@RequestHeader/@CookieValue', 'produces/consumes', '@PreAuthorize/@Secured/@RolesAllowed', '${property} placeholders resolved from application.properties/yml', 'server.servlet.context-path / spring.webflux.base-path application prefix', 'superclass @RequestMapping inheritance (cross-file)', 'route constants (static final, cross-file and static imports)', 'Kotlin controllers (arrays with [...])'],
     limitations: ['Profile-specific configuration (application-<profile>.yml) is not applied', '@FeignClient and @HttpExchange interfaces are clients and are excluded', 'Routes declared on interfaces are marked inferred (the implementing controller exposes them)'],
   },
@@ -214,7 +228,7 @@ export default [
   {
     id: 'jax-rs', name: 'Jakarta REST / JAX-RS (incl. Quarkus REST, RESTEasy)', language: 'java', langs: ['java'], status: 'supported',
     detect: (F) => imp('(javax|jakarta)\\.ws\\.rs')(F) || imp('org\\.jboss\\.resteasy')(F),
-    extract(F) { const r = jaxrs(F.P, F.language); return { routes: r.routes, stats: { controllers: r.controllers }, issues: jaxrsIssues(F.P), appPaths: appPaths(F.P) }; },
+    extract(F) { const r = jaxrs(F.P, F.language); return { routes: r.routes, stats: { controllers: r.controllers }, issues: jaxrsIssues(F.P), appPaths: appPaths(F.P), locators: jaxrsLocators(F.P) }; },
     patterns: ['@Path on resource classes and methods', '@GET/@POST/@PUT/@PATCH/@DELETE/@HEAD/@OPTIONS', '@PathParam/@QueryParam/@HeaderParam/@FormParam/@CookieParam (and Quarkus @RestPath/@RestQuery/…)', '@Consumes/@Produces on methods and classes', '@RolesAllowed/@Authenticated', '@ApplicationPath (cross-file) and quarkus.rest.path / quarkus.resteasy.path / quarkus.http.root-path'],
     limitations: ['Sub-resource locators are reported, their nested routes are not composed', 'Servlet mappings in web.xml are not parsed; without @ApplicationPath the application prefix is assumed to be the root (marked inferred unless the project is Quarkus)'],
   },

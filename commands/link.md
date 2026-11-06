@@ -11,4 +11,4 @@ Run `rmc link "$ARGUMENTS"` and report the result.
 - The portable reference (id, name, stack) goes to `.rmcontext/references/projects.json`, which can be committed.
 - The machine-specific path goes to `.rmcontext/.local/local.json`, which is git-ignored.
 - Linked projects are reference-only: query them with `rmc find <terms> --root "<path>"` and never copy their rules blindly.
-If the target has no `.rmcontext/`, tell the user to run `/rm-context:init` there first.
+If the target has no `.rmcontext/`, tell the user to run `/rmc:init` there first.

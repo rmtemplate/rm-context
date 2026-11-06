@@ -1,5 +1,5 @@
 {
-  "description": "RM Context automatic context: compact session summary, relevant knowledge per prompt, and one incremental refresh per turn after file changes. Deterministic; no model calls.",
+  "description": "RM Context automatic context: compact session summary, relevant knowledge per prompt, one incremental refresh per turn after file changes, and a delegation guard (RM Context agents run in the foreground, one at a time; the model that actually ran is reported from the subagent transcript). Deterministic; no model calls.",
   "hooks": {
     "SessionStart": [
       { "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/hooks.mjs\" session-start", "timeout": 15 } ] }
@@ -7,8 +7,15 @@
     "UserPromptSubmit": [
       { "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/hooks.mjs\" prompt", "timeout": 10 } ] }
     ],
+    "PreToolUse": [
+      { "matcher": "Agent|Task", "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/hooks.mjs\" pre-agent", "timeout": 5 } ] }
+    ],
     "PostToolUse": [
-      { "matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash", "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/hooks.mjs\" post-tool", "timeout": 5 } ] }
+      { "matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash", "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/hooks.mjs\" post-tool", "timeout": 5 } ] },
+      { "matcher": "Agent|Task", "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/hooks.mjs\" post-agent", "timeout": 5 } ] }
+    ],
+    "PostToolUseFailure": [
+      { "matcher": "Agent|Task", "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/hooks.mjs\" post-agent", "timeout": 5 } ] }
     ],
     "Stop": [
       { "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/hooks.mjs\" stop", "timeout": 60 } ] }

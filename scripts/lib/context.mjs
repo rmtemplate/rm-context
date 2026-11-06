@@ -34,7 +34,7 @@ const trim = (s, n) => (s.length > n ? s.slice(0, n - 1) + '…' : s);
 
 // ---------- session start ----------
 export function sessionSummary(c, cli) {
-  if (!c) return '[RM CONTEXT] No RM Context knowledge base in this project. Run /rm-context:init to create one (a deterministic scan; nothing was scanned automatically).';
+  if (!c) return '[RM CONTEXT] No RM Context knowledge base in this project. Run /rmc:init to create one (a deterministic scan; nothing was scanned automatically).';
   const conf = autoConfig(c);
   if (!conf.enabled || !conf.sessionStart) return '';
   const m = readJson(c.manifest, {});

@@ -10,13 +10,19 @@ const N = (v) => String(v ?? '').replace(/^\$/, '');
 
 // ---------- declarative ----------
 export function declarative(P, cfg) {
-  const routes = [], issues = [];
+  const routes = [], issues = [], controllerClasses = [];
   let controllers = 0;
   for (const cls of P.classes) {
-    if (!cfg.isController(cls)) continue;
-    controllers++;
-    let prefixes = cfg.classPrefixes(cls);
-    if (!prefixes.length) {
+    const isCtrl = cfg.isController(cls);
+    // An abstract base class is never mapped itself; its actions are emitted as templates that the resolver instantiates
+    // for every derived controller (inherited actions, possibly declared in another file).
+    const abstract = !isCtrl && cls.kind === 'class' && (cls.mods || []).includes('abstract') && !!cfg.abstractBases;
+    if (!isCtrl && !abstract) continue;
+    if (isCtrl) { controllers++; controllerClasses.push({ name: cls.name, line: cls.nameLine, methods: (cls.methods || []).map((m) => m.name) }); }
+    let prefixes = abstract ? [[]] : cfg.classPrefixes(cls);
+    if (!abstract && !prefixes.length && cfg.subResource?.(cls)) prefixes = [[{ locator: cls.name }]];
+    else if (!abstract && !prefixes.length && (cls.mods || []).includes('partial')) prefixes = [[{ partialOf: cls.name }]];
+    else if (!abstract && !prefixes.length) {
       const base = cls.bases.find((b) => !cfg.frameworkBases?.has(b.name) && !/^I[A-Z]/.test(b.name));
       prefixes = cfg.inheritPrefix && base && cls.kind !== 'interface' ? [[{ base: base.name }]] : [[]];
     }
@@ -41,11 +47,12 @@ export function declarative(P, cfg) {
             note: r.note || meta.note, conventional: r.conventional,
           }));
           if (r.conventional) Object.assign(routes[routes.length - 1], { conventional: true, action: m.name });
+          if (abstract) Object.assign(routes[routes.length - 1], { abstractBase: true, absolute: !!r.absolute });
         }
       }
     }
   }
-  return { routes, issues, controllers };
+  return { routes, issues, controllers, controllerClasses };
 }
 
 // ---------- registration ----------

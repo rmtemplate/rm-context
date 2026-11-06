@@ -91,8 +91,8 @@ Business logic lives in the core. Adapters translate a platform's agent invocati
 *Requires a platform adapter: currently Claude Code.*
 
 The agent is picked from the work being done:
-- **Role commands** go to their role: `/rm-context:fsd` goes to the Business Analyst.
-- **Templates** go to their owner: `/rm-context:document <type>` routes by the template catalog.
+- **Role commands** go to their role: `/rmc:fsd` goes to the Business Analyst.
+- **Templates** go to their owner: `/rmc:document <type>` routes by the template catalog.
 - **Workflows** route each step to its role: `discover`, `feature`, `assess`.
 - **Task categories** have a default agent: `rmc route --category <c>`.
 
@@ -127,6 +127,13 @@ rmc route categories            # categories, tiers and signals
 - **Escalation.** `rmc route --escalate <R-id> --reason "…" --handoff <H-id>` moves one subtask up a tier, at most `maxEscalations` times, and carries the previous agent's hand-off forward so the work isn't repeated.
 - **Metrics.** `rmc route stats` reports routes by tier, agent and category, plus escalations, context reuse and agents per workflow. Only metadata is stored; never prompts or code.
 
+### Foreground delegation and switch notices (Claude Code)
+
+Delegation is synchronous and visible:
+- **Foreground, one agent at a time.** RM Context agents run in the foreground and the main session waits for the result. Roles run one after another, never in parallel, unless the user explicitly asks for it. A `PreToolUse` hook enforces this: it denies an `rmc:*` agent call with `run_in_background`, and a second `rmc:*` agent while one is still running. To allow background or parallel agents for a project, set `"delegation": { "background": "allow" }` in `.rmcontext/config.json`. Other plugins' agents are not affected.
+- **Notice before a switch.** `rmc route --session-model <main session model>` prints a `Notice:` line that the main session shows before delegating, such as `Perpindahan ke model Haiku, karena bertugas sebagai Quick QA.` If the subagent model is the same as the main session's, it says so instead (`… sama dengan model sesi utama (tidak ada perpindahan model)`). Nothing is shown when the main session does the work itself. Set `routing.noticeLanguage` to `en` for English notices (`Switching to model Haiku to act as Quick QA.`).
+- **The model that actually ran.** The notice states what is requested. After the agent returns, a `PostToolUse` hook reads the subagent's own transcript and gives the main session the model recorded on each of its turns and Claude Code's `requestShape` (foreground or background). The main session reports that. When the transcript cannot be read, it says the model could not be verified, rather than repeating the configured one. Each delegation is logged as metadata (agent, requested model, actual model, mode, tokens, duration) in `.rmcontext/state/autocontext.jsonl`, never the prompt.
+
 **Platform limits.** RM Context recommends a model for each delegated agent. Applying it depends on the platform. In Claude Code, the model is set on the subagent; **your main session's model never changes** (use `/model` for that). Without an adapter, `rmc route` is a recommendation only.
 
 ## Persistent project knowledge
@@ -151,7 +158,7 @@ What the hooks never do:
 - inject anything that looks like a secret
 - rewrite approved documents
 
-Documents whose sources changed are only marked for review. Changes to `.rmcontext/` never trigger a refresh, so the refresh cannot loop. Without `.rmcontext/`, the session summary suggests `/rm-context:init`, and nothing is scanned automatically.
+Documents whose sources changed are only marked for review. Changes to `.rmcontext/` never trigger a refresh, so the refresh cannot loop. Without `.rmcontext/`, the session summary suggests `/rmc:init`, and nothing is scanned automatically.
 
 Adjust it in `.rmcontext/config.json`:
 
@@ -262,17 +269,25 @@ RM Context provides a standalone CLI and platform-specific integration instructi
 
 ```text
 /plugin marketplace add rmtemplate/rm-context
-/plugin install rm-context@rm-context-marketplace
+/plugin install rmc@rm-context-marketplace
 ```
 
 Or run them from a terminal:
 
 ```bash
 claude plugin marketplace add rmtemplate/rm-context
-claude plugin install rm-context@rm-context-marketplace
+claude plugin install rmc@rm-context-marketplace
 ```
 
 Restart Claude Code when prompted. To update later, run `/plugin marketplace update rm-context-marketplace`.
+
+**Upgrading from `/rm-context:*` (0.4.x).** The plugin id changed from `rm-context` to `rmc`, so commands are now `/rmc:<name>` (for example `/rm-context:ba` → `/rmc:ba`), agents `rmc:<agent>` and skills `rmc:<skill>`. The CLI is still `rmc`, the marketplace is still `rm-context-marketplace`, and `.rmcontext/` is unchanged, so no project needs to be re-initialized. Claude Code takes the command prefix from the plugin id and a plugin has one id, so there is no alias: remove the old plugin, then install the new one. Do not keep both installed, or every hook runs twice.
+
+```bash
+claude plugin uninstall rm-context@rm-context-marketplace
+claude plugin marketplace update rm-context-marketplace
+claude plugin install rmc@rm-context-marketplace
+```
 
 **Local development install.** Load the plugin from a local clone without installing it:
 
@@ -283,17 +298,17 @@ claude --plugin-dir ~/rm-context
 ```
 
 **Verify the install.**
-- Run `claude plugin list`. It should show `rm-context@rm-context-marketplace` with status *enabled*.
-- Or run `/rm-context:status` inside a project. It reports the project status, or says the project is not initialized yet.
+- Run `claude plugin list`. It should show `rmc@rm-context-marketplace` with status *enabled*.
+- Or run `/rmc:status` inside a project. It reports the project status, or says the project is not initialized yet.
 
 **First commands**
 
 ```text
-/rm-context:init                     scan the project into .rmcontext/
-/rm-context:viewer                   open the offline viewer
-/rm-context:assess                   team assessment of an existing project
-/rm-context:feature <description>    feature from requirements to verified code
-/rm-context:fsd <title>              Functional Specification (Business Analyst)
+/rmc:init                     scan the project into .rmcontext/
+/rmc:viewer                   open the offline viewer
+/rmc:assess                   team assessment of an existing project
+/rmc:feature <description>    feature from requirements to verified code
+/rmc:fsd <title>              Functional Specification (Business Analyst)
 ```
 
 **Limitations**
@@ -525,15 +540,15 @@ Run `rmc help` for the full reference. All commands run in the current directory
 
 | Command | Purpose |
 |---|---|
-| `/rm-context:init` · `/rm-context:refresh` · `/rm-context:status` | Set up, update and inspect `.rmcontext/` |
-| `/rm-context:find` · `/rm-context:impact` | Search and change impact |
-| `/rm-context:graph` · `/rm-context:viewer` | Open the viewer |
-| `/rm-context:link` | Register a related repository |
-| `/rm-context:routing` | Show agent defaults, tiers and categories |
-| `/rm-context:discover` · `/rm-context:feature` · `/rm-context:assess` | Workflows: new project, feature end to end, assessment of an existing project |
-| `/rm-context:ba` · `/rm-context:sa` · `/rm-context:pm` · `/rm-context:engineering` · `/rm-context:devops` | Work with one role |
-| `/rm-context:document` · `/rm-context:fsd` · `/rm-context:sipoc` · `/rm-context:srs` · `/rm-context:erd` · `/rm-context:adr` · `/rm-context:roadmap` · `/rm-context:rtm` · `/rm-context:gantt` | Documents and plans |
-| `/rm-context:review` · `/rm-context:architecture` · `/rm-context:project-health` | Code review, architecture analysis, health report |
+| `/rmc:init` · `/rmc:refresh` · `/rmc:status` | Set up, update and inspect `.rmcontext/` |
+| `/rmc:find` · `/rmc:impact` | Search and change impact |
+| `/rmc:graph` · `/rmc:viewer` | Open the viewer |
+| `/rmc:link` | Register a related repository |
+| `/rmc:routing` | Show agent defaults, tiers and categories |
+| `/rmc:discover` · `/rmc:feature` · `/rmc:assess` | Workflows: new project, feature end to end, assessment of an existing project |
+| `/rmc:ba` · `/rmc:sa` · `/rmc:pm` · `/rmc:engineering` · `/rmc:devops` | Work with one role |
+| `/rmc:document` · `/rmc:fsd` · `/rmc:sipoc` · `/rmc:srs` · `/rmc:erd` · `/rmc:adr` · `/rmc:roadmap` · `/rmc:rtm` · `/rmc:gantt` | Documents and plans |
+| `/rmc:review` · `/rmc:architecture` · `/rmc:project-health` | Code review, architecture analysis, health report |
 
 To approve a document, say so in chat, e.g. *"Approve FSD-001, approved by Jane Doe"*. Agents never approve on their own.
 
@@ -550,7 +565,8 @@ To approve a document, say so in chat, e.g. *"Approve FSD-001, approved by Jane 
 | `models` | Pin an agent to a model for this project, e.g. `{ "project-manager": "opus" }`. This turns off adaptive routing for that agent. Values: `opus`, `sonnet`, `haiku`, `inherit`, or a `claude-…` id |
 | `ignore` | Extra gitignore-style patterns to skip, e.g. `["legacy/**"]`. A `.rmcontextignore` file at the project root works too |
 | `maxFileBytes` | Files larger than this are skipped |
-| `routing` | Overrides plugin routing settings, e.g. `{ "enabled": false }` or `{ "maxEscalations": 2 }` |
+| `routing` | Overrides plugin routing settings, e.g. `{ "enabled": false }`, `{ "maxEscalations": 2 }` or `{ "noticeLanguage": "en" }` (delegation notice language: `id` default, `en`) |
+| `delegation` | `{ "background": "allow" }` lets RM Context agents run in the background or in parallel. Default: denied (foreground, one at a time). `RMC_ALLOW_BACKGROUND=1` does the same for one shell |
 | `tiers` | Overrides the tier → model mapping, e.g. `{ "medium": "opus" }` |
 | `autoContext` | Automatic context settings for Claude Code. See [Automatic context](#automatic-context-claude-code) |
 
