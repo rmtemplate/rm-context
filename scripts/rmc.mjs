@@ -8,7 +8,11 @@ import { ctx, parseArgs, readJson, writeJson, writeFile, requireInit, RmcError, 
 const HELP = `rmc — RM Context project intelligence CLI
 
 Core
-  init [--full]                    Create .rmcontext/ and run the first scan
+  init [--full] [--claude-md combine|replace|skip] [--confirm] [--no-claude-md]
+                                   New project: create .rmcontext/, first scan, RM Context section in ./CLAUDE.md.
+                                   Initialized project: policy update only (no scan) unless --full
+  claude-md [--check] [--strategy combine|replace] [--confirm]
+                                   Update the managed RM Context section in ./CLAUDE.md (idempotent); --check never writes
   refresh [--full]                 Incremental scan (only changed files are re-read)
   status [--json]                  Coverage, freshness, documents, plan, validation summary
   validate                         Validate manifest, config, graph, documents and plan
@@ -77,13 +81,53 @@ async function main(argv) {
     case undefined: case 'help': case '--help': return out(HELP);
 
     case 'init': {
-      const { initProject } = await import('./lib/project.mjs');
-      const created = initProject(c);
+      const P = await import('./lib/project.mjs');
+      const strategy = typeof args['claude-md'] === 'string' ? args['claude-md'] : undefined;
+      const skipMd = args['no-claude-md'] || strategy === 'skip';
+      if (strategy && !['combine', 'replace', 'skip'].includes(strategy)) fail('--claude-md takes combine, replace or skip.');
+      const confirm = args.confirm === true;
+      // A destructive replace is refused before anything is written.
+      if (strategy === 'replace' && !confirm && P.claudeMdState(c).userLines > 0) P.writeClaudeMd(c, { strategy, confirm });
+      const writeMd = () => (skipMd ? { action: 'skipped (--no-claude-md)' } : P.writeClaudeMd(c, { strategy: skipMd ? undefined : strategy, confirm }));
+      const mdLine = (md) => `CLAUDE.md: RM Context section ${md.action}${md.backup ? ` (backup: ${md.backup})` : ''}`;
+      if (fs.existsSync(c.manifest) && !args.full) {
+        // Already initialized: a policy update. No scan, no graph rebuild, no knowledge or telemetry change; only a
+        // changed CLAUDE.md is indexed (that one file), and only when the extractor is current (else it would re-read all).
+        const created = P.initProject(c);
+        const md = writeMd();
+        const { scan, EXTRACTOR_VERSION } = await import('./lib/scan.mjs');
+        const current = readJson(c.files, {}).extractorVersion === EXTRACTOR_VERSION;
+        let indexed = 'not needed';
+        if (['created', 'updated', 'replaced'].includes(md.action)) indexed = current ? (scan(root, { only: ['CLAUDE.md'] }), 'CLAUDE.md only') : 'skipped (extractor upgrade pending; run rmc refresh)';
+        const { GENERATOR } = await import('./lib/util.mjs');
+        return out([`Policy update for an initialized project (no scan: knowledge, graph and telemetry unchanged${created.length ? `; added missing ${created.join(', ')}` : ''}).`,
+          `${mdLine(md)} · index: ${indexed}`, P.formatClaudeMdState(P.claudeMdState(c)), ...P.policyReport(c, { generator: GENERATOR, extractorVersion: EXTRACTOR_VERSION }),
+          'Full rescan only on request: rmc init --full or rmc refresh --full.'].join('\n'));
+      }
+      const created = P.initProject(c);
+      // CLAUDE.md first, so the first scan already includes it and the next refresh does not report it as changed.
+      const md = writeMd();
       const { scan } = await import('./lib/scan.mjs');
       const r = scan(root, { full: true });
       const { buildViewer } = await import('./lib/viewer.mjs');
       buildViewer(c);
-      return out(`Initialized ${path.relative(root, c.base) || '.rmcontext'} (${created.length} items created).\n${scanSummary(r)}\nViewer: .rmcontext/viewer/index.html`);
+      return out(`Initialized ${path.relative(root, c.base) || '.rmcontext'} (${created.length} items created).\n${scanSummary(r)}\nViewer: .rmcontext/viewer/index.html\n${mdLine(md)}`);
+    }
+    case 'claude-md': {
+      const P = await import('./lib/project.mjs');
+      if (args.check) {
+        // Read-only: reports whether the managed section matches the active generator's policy; never writes.
+        const st = P.claudeMdState(c);
+        return out(args.json ? st : P.formatClaudeMdState(st));
+      }
+      requireInit(c);
+      const strategy = typeof args.strategy === 'string' ? args.strategy : undefined;
+      const md = P.writeClaudeMd(c, { strategy, confirm: args.confirm === true });
+      if (['created', 'updated', 'replaced'].includes(md.action)) {
+        const { scan, EXTRACTOR_VERSION } = await import('./lib/scan.mjs');
+        if (readJson(c.files, {}).extractorVersion === EXTRACTOR_VERSION) scan(root, { only: ['CLAUDE.md'] });
+      }
+      return out(args.json ? md : `CLAUDE.md: RM Context section ${md.action}${md.backup ? ` (backup: ${md.backup})` : ''} (${path.relative(root, md.file) || md.file})`);
     }
     case 'refresh': case 'scan': {
       requireInit(c);
@@ -191,7 +235,7 @@ async function main(argv) {
       if (args.json) return out(r);
       const { loadModelConfig } = await import('./lib/routing.mjs');
       const m = loadModelConfig(c);
-      return out(formatRouting(r) + `\n\nAdaptive routing: ${m.routing.enabled ? 'on' : 'off'} · tiers low=${m.tiers.low} medium=${m.tiers.medium} high=${m.tiers.high} · fallback tier ${m.routing.fallbackTier} · escalation ${m.routing.allowEscalation ? `max ${m.routing.maxEscalations}` : 'off'}\nThe agent defaults above apply when a delegation has no task category; with a category, use: rmc route --category <c>`);
+      return out(formatRouting(r) + `\n\nAdaptive routing: ${m.routing.enabled ? 'on' : 'off'} · role policy above (generic tier mapping for agents without one: low=${m.tiers.low} medium=${m.tiers.medium} high=${m.tiers.high}) · fallback tier ${m.routing.fallbackTier} · escalation ${m.routing.allowEscalation ? `max ${m.routing.maxEscalations}` : 'off'}\nThe agent defaults above apply when a delegation has no task category; with a category, use: rmc route --category <c>`);
     }
     case 'route': {
       const R = await import('./lib/routing.mjs');

@@ -133,7 +133,8 @@ Before each delegation, assess the task, then run:
 
 | Signal | Meaning | Effect |
 |---|---|---|
-| `security` | auth, payments, secrets, permissions | high |
+| `security` | security-sensitive change or review | high |
+| `sensitive` | auth, authorization, payment, credentials, personal data | at least medium; with `security`, enables the QA and Senior Engineer security-critical (Opus) policy |
 | `architecture` | architectural decision or redesign | high |
 | `irreversible` | hard to undo (data migration, public API break) | high |
 | `debugging` | root cause unknown, needs deep investigation | high |
@@ -148,8 +149,25 @@ Do not treat every code change as high. A typo fix is `small-change` with `trivi
 1. The user named a model: `--model`.
 2. The project config `.rmcontext/config.json` sets `models.<agent>`.
 3. The plugin config `config/models.json` sets `agents.<agent>.override`.
-4. The adaptive tier from the category and signals.
+4. The agent's **role policy** (`roles` in `config/models.json`, or `roles` in `.rmcontext/config.json`) for the complexity tier from the category and signals. A project-wide `tiers` mapping in `.rmcontext/config.json` counts as a project override and wins over the role policy.
 5. The agent's default model, when there is no category.
+
+The main session model is not in this list. An Opus main session does not make subagents Opus; pass `--model` only when the user named a model.
+
+**Complexity is not a model.** The tier (low/medium/high) is how hard the task is. Each role maps it to a model:
+
+| Role | low | medium | high | Opus (high only, when…) |
+|---|---|---|---|---|
+| Senior Engineer | Sonnet | Sonnet | Sonnet | `sensitive`, `architecture`+`ambiguous` or `architecture`+`cross-module`, for `security`, `adr` and `code-review` tasks only. Never for implementation size. |
+| System Analyst | Sonnet | Sonnet | Sonnet | `ambiguous`, `cross-module` or `architecture` |
+| Architecture | Sonnet | Sonnet | Sonnet | an architecture task, `irreversible`, `infra-design`, or `cross-module`+`ambiguous` |
+| QA | Sonnet | Sonnet | Sonnet | `security`+`sensitive` or `security`+`irreversible` |
+| Quick QA | Haiku | Haiku | Sonnet | — |
+| Documentation, Project Manager | Haiku | Sonnet | Sonnet | only by escalation |
+| Business Analyst | Haiku | Sonnet | Sonnet | `ambiguous`+`cross-module` |
+| DevOps Engineer | Haiku | Sonnet | Sonnet | `infra-design`, `security` or `irreversible` |
+
+For a hard design question, route the analysis to the System Analyst or Architecture (Opus), then hand the implementation to the Senior Engineer (Sonnet).
 
 An unsupported value falls back to `routing.fallbackTier`, and the CLI says so.
 
@@ -161,6 +179,9 @@ The CLI enforces the limits:
 - A reason already used cannot be reused.
 - A model chosen by the user or fixed by configuration is never escalated.
 
+- An escalation moves to the next stronger model the role allows. A role already on its strongest model is not escalated.
+- A failure from missing information is not a reasoning limit. A reason like "missing context" or "kurang informasi" is refused: retry on the same model with the missing context (`rmc find`, the hand-off).
+
 If the stronger model is blocked too, report to the user.
 
 **De-escalation.** When a task turns out simpler than it looked, route the remaining steps with `trivial` or `retrieval`, or answer directly. Don't keep delegating to the high tier.
@@ -169,7 +190,8 @@ If the stronger model is blocked too, report to the user.
 - Delegate to the fewest agents that can do the job.
 - No background agents, no parallel agents, no polling: one foreground agent, one result.
 - Pass ids, paths and hand-off ids rather than whole documents.
-- Reuse hand-offs instead of re-scanning.
+- Reuse hand-offs instead of re-scanning. Work knowledge first: `.rmcontext/` knowledge → targeted source inspection → broader exploration only when necessary. A full scan is for initial discovery, large invalidation, fundamental restructuring or an explicit full audit.
+- Reuse first, smallest correct change: use existing components, functions, DTOs and types before writing new ones (see the `software-engineering` skill).
 - Run `rmc refresh` only when files changed.
 - An `Efficiency (advisory, routing unchanged):` line under the routing block is advice from past benchmarks. Delegate with the routed `model` anyway; mention the advice only if the user asks about cost.
 - **`/rmc:run` workflows.** Run every stage the plan lists with `rmc workflow start` → the Agent call it prints → `rmc workflow done`. Never do a stage's work yourself, never skip a stage, and never call `rmc workflow finish` before every stage passed. As an agent inside a workflow, end your reply with the json hand-off your stage package asks for, and never start other agents.

@@ -1,11 +1,11 @@
 {
   "agents": {
     "business-analyst": {
-      "model": "opus",
+      "model": "sonnet",
       "reason": "Complex requirement analysis and ambiguity detection"
     },
     "system-analyst": {
-      "model": "opus",
+      "model": "sonnet",
       "reason": "System reasoning, data modelling and architecture"
     },
     "project-manager": {
@@ -13,8 +13,8 @@
       "reason": "Planning, scheduling and coordination"
     },
     "senior-engineer": {
-      "model": "opus",
-      "reason": "Complex engineering decisions and implementation"
+      "model": "sonnet",
+      "reason": "Coding and engineering judgement; Sonnet is the coding model"
     },
     "devops-engineer": {
       "model": "opus",
@@ -56,6 +56,121 @@
     "low": "haiku",
     "medium": "sonnet",
     "high": "opus"
+  },
+  "roles": {
+    "senior-engineer": {
+      "low": "sonnet",
+      "medium": "sonnet",
+      "high": "sonnet",
+      "deep": {
+        "model": "opus",
+        "when": [
+          "sensitive",
+          "architecture+ambiguous",
+          "architecture+cross-module"
+        ],
+        "categories": [
+          "security",
+          "adr",
+          "code-review"
+        ]
+      },
+      "reason": "Sonnet codes at every complexity; Opus only for security-critical analysis or fundamental architecture trade-offs, never for implementation size"
+    },
+    "system-analyst": {
+      "low": "sonnet",
+      "medium": "sonnet",
+      "high": "sonnet",
+      "deep": {
+        "model": "opus",
+        "when": [
+          "ambiguous",
+          "cross-module",
+          "architecture"
+        ]
+      },
+      "reason": "Sonnet for standard analysis; Opus for conflicting requirements, complex domains and cross-system impact"
+    },
+    "architecture": {
+      "low": "sonnet",
+      "medium": "sonnet",
+      "high": "sonnet",
+      "deep": {
+        "model": "opus",
+        "when": [
+          "architecture",
+          "irreversible",
+          "infra-design",
+          "cross-module+ambiguous"
+        ]
+      },
+      "reason": "Sonnet for standard evaluation; Opus for fundamental architecture decisions and high-risk cross-system design"
+    },
+    "qa": {
+      "low": "sonnet",
+      "medium": "sonnet",
+      "high": "sonnet",
+      "deep": {
+        "model": "opus",
+        "when": [
+          "security+sensitive",
+          "security+irreversible"
+        ]
+      },
+      "reason": "Sonnet for integration, edge cases and regressions; Opus only for security-critical verification"
+    },
+    "quick-qa": {
+      "low": "haiku",
+      "medium": "haiku",
+      "high": "sonnet",
+      "reason": "Haiku for focused checks with clear criteria"
+    },
+    "documentation": {
+      "low": "haiku",
+      "medium": "sonnet",
+      "high": "sonnet",
+      "deep": {
+        "model": "opus",
+        "when": []
+      },
+      "reason": "Haiku for simple updates, Sonnet for technical documentation; Opus only by escalation"
+    },
+    "business-analyst": {
+      "low": "haiku",
+      "medium": "sonnet",
+      "high": "sonnet",
+      "deep": {
+        "model": "opus",
+        "when": [
+          "ambiguous+cross-module"
+        ]
+      },
+      "reason": "Sonnet for business analysis; Opus only for ambiguous cross-domain reasoning"
+    },
+    "project-manager": {
+      "low": "haiku",
+      "medium": "sonnet",
+      "high": "sonnet",
+      "deep": {
+        "model": "opus",
+        "when": []
+      },
+      "reason": "Haiku for status and administrative updates, Sonnet for planning; Opus only by escalation"
+    },
+    "devops-engineer": {
+      "low": "haiku",
+      "medium": "sonnet",
+      "high": "sonnet",
+      "deep": {
+        "model": "opus",
+        "when": [
+          "infra-design",
+          "security",
+          "irreversible"
+        ]
+      },
+      "reason": "Sonnet for standard infrastructure work; Opus for complex infrastructure architecture and security-critical changes"
+    }
   },
   "supportedModels": [
     "opus",

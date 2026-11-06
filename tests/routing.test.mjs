@@ -26,24 +26,28 @@ test('FSD and Gantt generation select Sonnet, with agents chosen independently o
   assert.deepEqual([fsd.agent, fsd.model, fsd.complexity], ['business-analyst', 'sonnet', 'medium']);
   const gantt = route('--category', 'gantt');
   assert.deepEqual([gantt.agent, gantt.model], ['project-manager', 'sonnet']);
-  // Same agent, different task → different model: the BA default is Opus, the FSD gets Sonnet.
-  assert.equal(JSON.parse(fs.readFileSync(path.join(ROOT, 'config/models.json'), 'utf8')).agents['business-analyst'].model, 'opus');
+  // Agent default and role policy are separate: an FSD is routed by the BA role policy, not by the agent default.
+  assert.equal(JSON.parse(fs.readFileSync(path.join(ROOT, 'config/models.json'), 'utf8')).roles['business-analyst'].medium, 'sonnet');
 });
 
 test('simple bug fix selects Sonnet; a trivial one may go lower; code alone is not high', () => {
   assert.equal(route('--category', 'bug-fix').model, 'sonnet');
   assert.equal(route('--category', 'bug-fix', '--signals', 'code').model, 'sonnet');
-  assert.equal(route('--category', 'small-change', '--signals', 'trivial').model, 'haiku');
-  assert.equal(route('--category', 'small-change', '--signals', 'trivial,security').model, 'opus', 'a high signal beats trivial');
+  // Coding stays on Sonnet at every complexity: a trivial change is low, a security-touching one high, both Sonnet.
+  const trivial = route('--category', 'small-change', '--signals', 'trivial');
+  assert.deepEqual([trivial.model, trivial.complexity], ['sonnet', 'low']);
+  const risky = route('--category', 'small-change', '--signals', 'trivial,security');
+  assert.deepEqual([risky.model, risky.complexity], ['sonnet', 'high'], 'a high signal beats trivial; high is not Opus by itself');
 });
 
-test('complex feature implementation and complex architecture analysis select Opus', () => {
+test('complex feature implementation stays on Sonnet; complex architecture analysis selects Opus', () => {
   const f = route('--category', 'complex-feature', '--signals', 'code,modules:3');
-  assert.deepEqual([f.agent, f.model, f.complexity], ['senior-engineer', 'opus', 'high']);
+  assert.deepEqual([f.agent, f.model, f.complexity], ['senior-engineer', 'sonnet', 'high']);
+  assert.match(f.basis, /senior-engineer role policy: high → sonnet/);
   assert.equal(route('--category', 'architecture').model, 'opus');
-  // Complexity raises a medium task: a small feature that touches security goes to Opus.
-  assert.equal(route('--category', 'small-feature', '--signals', 'security').model, 'opus');
-  // A document with architectural implications is high even without code.
+  // Complexity raises a medium task, but a security-touching small feature is still Sonnet coding.
+  assert.deepEqual([route('--category', 'small-feature', '--signals', 'security').model, route('--category', 'small-feature', '--signals', 'security').complexity], ['sonnet', 'high']);
+  // A document with architectural implications is high and goes to the System Analyst's deep model.
   assert.equal(route('--category', 'srs', '--signals', 'architecture').model, 'opus');
 });
 
@@ -62,7 +66,7 @@ test('per-project model override is respected', () => {
   assert.equal(route('--category', 'fsd').model, 'opus', 'project tier mapping applies');
   setConfig({ tiers: {}, routing: { enabled: false } });
   const off = route('--category', 'fsd');
-  assert.deepEqual([off.model, off.source], ['opus', 'agent default'], 'routing disabled → agent default');
+  assert.deepEqual([off.model, off.source], ['sonnet', 'agent default'], 'routing disabled → agent default');
   setConfig({ routing: {} });
 });
 

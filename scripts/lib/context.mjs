@@ -181,7 +181,14 @@ export function retrieve(c, prompt, override = {}) {
   const { known, ranked, total } = rankNodes(g, terms);
   if (infra) for (const r of ranked) if (G.layerOf(r.n.type) === 'infrastructure') r.score = Math.min(1, r.score * 1.3);
   ranked.sort((a, b) => b.score - a.score);
-  const hits = ranked.filter((r) => r.score >= cfg.minimumRelevance).slice(0, cfg.maxResults);
+  let hits = ranked.filter((r) => r.score >= cfg.minimumRelevance && !retired(r.n)).slice(0, cfg.maxResults);
+  // override.seed: hits found per subtask, criterion and identifier (retrieveTargeted). Merged with the whole-prompt
+  // hits, deduplicated by node id, best score wins; nothing below minimumRelevance is added to fill the list.
+  if (cfg.seed?.length) {
+    const by = new Map(hits.map((h) => [h.n.id, h]));
+    for (const s of cfg.seed) { const h = by.get(s.n.id); if (!h || s.score > h.score) by.set(s.n.id, { ...h, ...s }); }
+    hits = [...by.values()].sort((a, b) => b.score - a.score).slice(0, cfg.maxResults);
+  }
   // Infrastructure intent ("deploy", "docker", "pipeline"…): the infrastructure inventory is the relevant context even without name matches.
   const INFRA_ORDER = ['pipeline', 'deployment', 'container', 'service', 'server', 'environment', 'network', 'integration'];
   if (infra) for (const n of g.nodes.filter((x) => INFRA_ORDER.includes(x.type)).sort((a, b) => INFRA_ORDER.indexOf(a.type) - INFRA_ORDER.indexOf(b.type)))
@@ -195,7 +202,8 @@ export function retrieve(c, prompt, override = {}) {
   if (!hits.length && !docs.length && !notes.length && !docTypes.length) return { text: '', tokens: 0, hits: 0, ms: Date.now() - t0, terms: terms.size };
 
   // Group hits and pull in their most useful one-hop neighbours.
-  const S = { modules: new Map(), impl: [], apis: [], data: [], tests: [], business: [], infra: [], related: [] };
+  const S = { modules: new Map(), reuse: [], impl: [], apis: [], data: [], tests: [], business: [], infra: [], related: [] };
+  const reuse = cfg.reuse || new Map(); // node id → why it is a reuse candidate
   const seen = new Set();
   let stale = 0;
   const put = (n, why) => {
@@ -206,6 +214,7 @@ export function retrieve(c, prompt, override = {}) {
     if (old) stale++;
     const line = `${n.type === 'file' || n.type === 'test' ? n.name : `${n.type} ${n.name}`}${where && !where.startsWith(n.name) ? ` — ${where}` : ''}${conf(n)}${old ? ' [stale]' : ''}${why ? ` (${why})` : ''}`;
     if (n.type === 'module') S.modules.set(n.id, n.name);
+    else if (reuse.has(n.id)) S.reuse.push(`${n.type} ${n.name}${where ? ` — ${where}` : ''}${conf(n)}${old ? ' [stale]' : ''} (${reuse.get(n.id)})`);
     else if (n.type === 'api') S.apis.push(line);
     else if (['table', 'entity', 'database'].includes(n.type)) S.data.push(line);
     else if (n.type === 'test') S.tests.push(line);
@@ -214,6 +223,7 @@ export function retrieve(c, prompt, override = {}) {
     else if (n.type !== 'dependency' && n.type !== 'project') S.impl.push(line);
   };
   for (const h of hits) put(h.n);
+  for (const id of reuse.keys()) { const n = ix.byId.get(id); if (n) put(n); }
   const REL = new Set(['belongs_to', 'implements', 'reads_from', 'writes_to', 'tested_by', 'satisfies', 'calls', 'integrates_with', 'deployed_on']);
   for (const h of hits) {
     for (const e of [...ix.out(h.n.id), ...ix.inc(h.n.id)]) {
@@ -232,15 +242,21 @@ export function retrieve(c, prompt, override = {}) {
   const footer = ['Instruction: use this as existing project context. Verify the cited source before implementation decisions; [inferred] links are heuristics, not verified behaviour.',
     `More: rmc find <terms> · rmc impact <file|id>${docTypes.length ? ` · rmc doc new ${docTypes[0]} --title "…" --author <agent>` : ''}`].join('\n');
   let used = tokens(out.join('\n') + footer);
-  const KEY = { 'Business rules & requirements': 'business', Implementation: 'impl', APIs: 'apis', Data: 'data', Tests: 'tests', Infrastructure: 'infra', Documents: 'docs', Templates: 'templates', Notes: 'notes' };
+  const dropped = { role: 0, limit: 0, budget: 0 };
+  let included = 0;
+  const KEY = { 'Reusable implementations': 'reuse', 'Business rules & requirements': 'business', Implementation: 'impl', APIs: 'apis', Data: 'data', Tests: 'tests', Infrastructure: 'infra', Documents: 'docs', Templates: 'templates', Notes: 'notes' };
   const section = (title, items, max) => {
-    if (!items.length || (cfg.sections && !cfg.sections.includes(KEY[title]))) return; // override.sections: a role's subset
+    if (!items.length) return;
+    if (cfg.sections && !cfg.sections.includes(KEY[title])) { dropped.role += items.length; return; } // override.sections: a role's subset
     const head = `${title}:`;
-    if (used + tokens(head) > budget) return;
+    if (used + tokens(head) > budget) { dropped.budget += items.length; return; }
     out.push(head); used += tokens(head);
-    for (const it of items.slice(0, max)) { const l = `- ${it}`; if (used + tokens(l) > budget) break; out.push(l); used += tokens(l); }
+    dropped.limit += Math.max(0, items.length - max);
+    const list = items.slice(0, max);
+    for (let i = 0; i < list.length; i++) { const l = `- ${list[i]}`; if (used + tokens(l) > budget) { dropped.budget += list.length - i; break; } out.push(l); used += tokens(l); included++; }
   };
   if (S.modules.size) { const l = `Relevant modules: ${[...S.modules.values()].slice(0, 6).join(', ')}`; out.push(l); used += tokens(l); }
+  section('Reusable implementations', S.reuse, 6);
   section('Business rules & requirements', S.business, 6);
   section('Implementation', S.impl, 8);
   section('APIs', S.apis, 6);
@@ -255,7 +271,113 @@ export function retrieve(c, prompt, override = {}) {
   while (tokens(out.join('\n')) > budget && out.length > 3) out.splice(out.length - 2, 1);
   while (out.length > 3 && /:$/.test(out[out.length - 2])) out.splice(out.length - 2, 1); // no dangling section heading
   const text = out.length > 3 && tokens(out.join('\n')) <= budget ? out.join('\n') : '';
-  return { text: findSecrets(text).length ? '' : text, tokens: tokens(text), hits: hits.length, stale, ms: Date.now() - t0, terms: terms.size, topScore: hits[0]?.score ?? 0 };
+  return { text: findSecrets(text).length ? '' : text, tokens: tokens(text), hits: hits.length, stale, ms: Date.now() - t0, terms: terms.size, topScore: hits[0]?.score ?? 0,
+    included, dropped, reuseShown: S.reuse.length, hitIds: hits.map((h) => h.n.id) };
+}
+
+// Knowledge whose lifecycle ended is never offered as current (attrs.lifecycle / attrs.status on agent-written nodes).
+const retired = (n) => /^(deprecated|removed|superseded|obsolete|retired)$/i.test(String(n.attrs?.lifecycle || n.attrs?.status || ''));
+
+// ---------- targeted retrieval (workflow stage packages) ----------
+// A long task dilutes any single term, so a helper named once among many words can fall below minimumRelevance.
+// retrieveTargeted() therefore ranks per subtask (each clause of the task and each acceptance criterion) and per
+// explicit identifier, merges and deduplicates the hits, follows the dependency graph from the strongest hits to the
+// helpers they already import (reuse candidates), and renders through retrieve() with the same budget and labels.
+const REUSABLE = new Set(['function', 'class', 'service', 'component']);
+const CLAUSE = /[.;!?\n]+|\s(?:then|and then|after that|afterwards|also|lalu|kemudian|setelah itu|serta|selanjutnya)\s/i;
+export function subtasksOf(task, criteria = []) {
+  const clauses = String(task || '').split(CLAUSE).map((x) => x.trim()).filter((x) => queryTerms(x).terms.size >= 1);
+  const out = [];
+  clauses.slice(0, 8).forEach((text, i) => out.push({ id: `T${i + 1}`, text }));
+  criteria.slice(0, 10).forEach((text, i) => out.push({ id: `C${i + 1}`, text }));
+  return out;
+}
+// Explicit identifiers: `backticked`, camelCase / PascalCase / snake_case names, file paths, routes, plus any task
+// word that is exactly the name of a function, class, service, component, entity or table in the graph.
+export function identifiersOf(text, g = null) {
+  const t = String(text || '');
+  const found = new Set();
+  for (const m of t.matchAll(/`([^`\s]{2,80})`/g)) found.add(m[1]);
+  for (const m of t.matchAll(/\b(?:[a-z]+[A-Z][A-Za-z0-9]*|[A-Z][a-z0-9]+[A-Z][A-Za-z0-9]*|[a-z][a-z0-9]*_[a-z0-9_]+)\b/g)) found.add(m[0]);
+  for (const m of t.matchAll(/(?:^|[\s(])((?:[\w.-]+\/)+[\w.-]+\.[a-z]{1,5})\b/g)) found.add(m[1]);
+  for (const m of t.matchAll(/\b(?:GET|POST|PUT|PATCH|DELETE)\s+(\/[\w/:{}.-]*)/g)) found.add(m[1]);
+  if (g) {
+    const names = new Map();
+    for (const n of g.nodes) if (['function', 'class', 'service', 'component', 'entity', 'table'].includes(n.type)) { const b = baseName(n.name); if (b.length >= 5) names.set(b, n.name); }
+    for (const w of new Set(t.split(/[^\p{L}\p{N}_$]+/u))) if (w.length >= 5 && !STOP.has(w.toLowerCase()) && names.has(w.toLowerCase())) found.add(w);
+  }
+  return [...found].slice(0, 12);
+}
+const baseName = (s) => String(s).split(/[#/\\:]/).filter(Boolean).at(-1)?.replace(/\.[a-z0-9]+$/i, '').split('.').at(-1)?.toLowerCase() || '';
+
+export function retrieveTargeted(c, task, { criteria = [], ...override } = {}) {
+  const cfg = { ...autoConfig(c), ...override };
+  const g = G.loadGraph(c);
+  const ix = G.index(g);
+  const subs = subtasksOf(task, criteria);
+  const idents = identifiersOf([task, ...criteria].join('\n'), g);
+  const best = new Map(); // node id → { n, score, via: Set }
+  const belowIds = new Set();
+  let lifecycle = 0;
+  const eliminated = [];
+  const offer = (n, score, via) => {
+    if (retired(n)) { lifecycle++; if (eliminated.length < 8) eliminated.push({ id: n.id, reason: 'lifecycle ended' }); return; }
+    const b = best.get(n.id);
+    if (b) { b.via.add(via); b.score = Math.min(1, Math.max(b.score, score) + 0.02); } else best.set(n.id, { n, score, via: new Set([via]) });
+  };
+  // 1. Identifiers: an exact name, file or route match is strong evidence, whatever else the task says.
+  for (const id of idents) {
+    const key = id.toLowerCase().replace(/^\//, ''), base = baseName(id);
+    for (const n of g.nodes) {
+      if (n.type === 'project' || n.type === 'dependency') continue;
+      const files = (n.evidence || []).map((e) => e.file).filter(Boolean);
+      const hit = (base && baseName(n.name) === base) || files.some((f) => f.toLowerCase() === key) || (n.type === 'api' && String(n.attrs?.path || n.name).toLowerCase().includes(key) && key.length >= 3);
+      if (hit) offer(n, n.type === 'file' ? 0.9 : 0.95, `identifier ${id}`);
+    }
+  }
+  // 2. Each subtask and criterion on its own, so its terms are not diluted by the rest of the task.
+  for (const s of subs) {
+    const { ranked } = rankNodes(g, queryTerms(s.text).terms);
+    for (const r of ranked) {
+      if (r.score >= cfg.minimumRelevance) offer(r.n, r.score, s.id);
+      else belowIds.add(r.n.id);
+    }
+  }
+  // 3. Dependency graph: what the strongest hits already import (and the helpers defined there) is reusable.
+  const reuse = new Map();
+  const fileOf = (n) => (n.type === 'file' ? n.id : (n.evidence || []).find((e) => e.file) ? `file:${n.evidence.find((e) => e.file).file}` : null);
+  const strong = [...best.values()].filter((b) => b.score >= Math.max(cfg.minimumRelevance, 0.6)).sort((a, b) => b.score - a.score).slice(0, 6);
+  for (const b of strong) {
+    if (REUSABLE.has(b.n.type)) reuse.set(b.n.id, `matches ${[...b.via].slice(0, 2).join(', ')}`);
+    const f = fileOf(b.n);
+    if (!f) continue;
+    let k = 0;
+    for (const e of ix.out(f)) {
+      if (e.type !== 'depends_on' || k >= 3) continue;
+      const dep = ix.byId.get(e.target);
+      if (!dep || dep.type !== 'file') continue;
+      for (const d of ix.inc(dep.id)) {
+        const n = ix.byId.get(d.source);
+        if (d.type !== 'belongs_to' || !n || !REUSABLE.has(n.type) || retired(n) || k >= 3) continue;
+        if (!reuse.has(n.id)) { reuse.set(n.id, `imported by ${f.replace(/^file:/, '').split('/').pop()}`); k++; }
+      }
+    }
+  }
+  const below = [...belowIds].filter((id) => !best.has(id)).length;
+  const seed = [...best.values()].map((b) => ({ n: b.n, score: b.score }));
+  const r = retrieve(c, task, { ...override, seed, reuse });
+  const shownIds = new Set(r.hitIds || []);
+  for (const b of best.values()) if (!shownIds.has(b.n.id) && eliminated.length < 8) eliminated.push({ id: b.n.id, reason: 'outside the result limit' });
+  const diag = {
+    subtasks: subs.filter((s) => s.id.startsWith('T')).length, criteria: subs.filter((s) => s.id.startsWith('C')).length,
+    identifiers: idents, terms: queryTerms([task, ...criteria].join('\n')).terms.size,
+    candidates: best.size + below + lifecycle, matched: best.size,
+    included: r.included || 0,
+    eliminated: { belowRelevance: below, lifecycle, outsideLimit: Math.max(0, best.size - (r.hits || 0)), roleSections: r.dropped?.role || 0, sectionLimit: r.dropped?.limit || 0, budget: r.dropped?.budget || 0 },
+    eliminatedSample: eliminated,
+    reuse: [...reuse.keys()].slice(0, 8), reuseShown: r.reuseShown || 0, tokens: r.tokens,
+  };
+  return { ...r, diag };
 }
 
 // ---------- change tracking & coalesced refresh ----------

@@ -15,11 +15,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { readJson, now, fail } from './util.mjs';
-import { route, roleName, classifyPrompt, loadModelConfig } from './routing.mjs';
+import { route, roleName, classifyPrompt, loadModelConfig, isContextGap } from './routing.mjs';
 import { readSession, writeSession, updateTurn, isRmcAgent } from './delegation.mjs';
 
 const DEFAULT_LIMITS = { maxAttempts: 2, maxQaLoops: 2 }; // per stage: 1 retry · per workflow: 2 returns to implementation
-const RISK_SIGNALS = ['security', 'irreversible', 'architecture'];
+const RISK_SIGNALS = ['security', 'irreversible', 'architecture', 'sensitive'];
 const HIGH_RISK = new Set(['security', 'migration', 'complex-feature', 'refactor', 'architecture', 'infra-design']);
 const IMPLEMENT = { 'small-feature': 'feature', 'complex-feature': 'feature', 'bug-fix': 'fix', 'small-change': 'fix', debugging: 'fix', refactor: 'fix', migration: 'fix' };
 const INVESTIGATE = { search: ['system-analyst', 'system-analysis'], 'system-analysis': ['system-analyst', 'system-analysis'], 'repo-analysis': ['architecture', 'repo-analysis'], impact: ['architecture', 'impact'], architecture: ['architecture', 'architecture'] };
@@ -40,14 +40,15 @@ const needsVerification = (w) => Boolean(w.criteria?.length || w.verifyRequired 
 const checksOf = (w) => w.checks || (w.criteria || []).map((_, i) => ({ id: `C${i + 1}`, status: 'unverified' }));
 const GOAL = {
   analysis: 'Analyse the task: affected modules and files, API and data contracts, risks, acceptance criteria to meet, open questions. Do not change source files.',
-  implement: 'Implement the change described by the task and the input hand-off. Follow the project conventions, keep unrelated code unchanged, run focused tests.',
-  verify: 'Verify the implementation against every acceptance criterion and the input hand-off. Run the relevant tests. Do not modify source. Verdict "pass" only if every criterion is met.',
+  implement: 'Implement the change described by the task and the input hand-off: the smallest correct change. Start from the hand-off and the knowledge below, not a new analysis. Before writing anything new, reuse or extend the existing component, function, service, DTO, type or utility that does it (check its consumers before changing shared code); no speculative abstractions, one-use helpers, duplicate validation/state/API calls, new files or dependencies without need. Keep types, error handling, authorization and business rules. Follow the project conventions, keep unrelated code unchanged, run focused tests.',
+  verify: 'Verify the implementation against every acceptance criterion and the input hand-off. Run the relevant tests. Do not modify source. Verdict "pass" only if every criterion is met. Also check for needless duplication: a re-defined DTO/type/interface, logic copied instead of reused, an abstraction without a need. Report it as a finding; do not ask for cosmetic refactoring of simple, correct code.',
   document: 'Update the documentation the task needs, from verified facts only.',
   work: 'Do the task for your role.',
 };
-const SECTIONS = { analysis: ['business', 'impl', 'apis', 'data', 'docs', 'infra', 'notes'], implement: ['impl', 'apis', 'data', 'tests', 'notes'],
-  verify: ['tests', 'apis', 'impl', 'business'], document: ['docs', 'business', 'impl', 'apis', 'data', 'notes'], work: null };
-const POLICY = 'Knowledge policy: unlabelled entries are verified and fresh — use them without reopening the source unless you change that code. [inferred] = heuristic: confirm before relying on it, never present it as verified. [stale] = the file changed since the last scan: re-read it.';
+const SECTIONS = { analysis: ['reuse', 'business', 'impl', 'apis', 'data', 'docs', 'infra', 'notes'], implement: ['reuse', 'impl', 'apis', 'data', 'tests', 'notes'],
+  verify: ['reuse', 'tests', 'apis', 'impl', 'business'], document: ['docs', 'business', 'impl', 'apis', 'data', 'notes'], work: null };
+const POLICY = 'Knowledge policy: knowledge first — start from the input hand-off and the entries below; do not repeat an earlier stage\'s analysis or scan the repository. Unlabelled entries are verified and fresh — use them without reopening the source unless you change that code. [inferred] = heuristic: confirm before relying on it, never present it as verified. [stale] = the file changed since the last scan: re-read only that file. Source, schema and config win on conflict. Inspect further files only for what the knowledge does not cover, and say why.';
+const NO_KNOWLEDGE = 'No recorded knowledge matched this stage: inspect only the files the task or the hand-off names, or that `rmc find <terms>` points to; widen only when an unrecorded dependency requires it. Do not run a full scan for this.';
 const ACTIVE = new Set(['planned', 'running']);
 const tokens = (s) => Math.ceil(String(s || '').length / 3.5);
 const cap = (m) => (m === 'inherit' ? 'main session model' : m[0].toUpperCase() + m.slice(1));
@@ -129,21 +130,25 @@ export async function plan(c, o = {}) {
     try { changed = new Set((await import('./project.mjs')).changedSinceScan(c)); } catch { changed = null; }
     const X = await import('./context.mjs');
     for (const role of new Set(defs.map((d) => d.role))) {
-      const r = X.retrieve(c, task, { sections: SECTIONS[role], changed, maxContextTokens: 900 });
-      knowledge[role] = { text: r.text, tokens: r.tokens, hits: r.hits, stale: r.stale || 0 };
+      // Per subtask, criterion and identifier, merged and deduplicated (long tasks do not drown a named helper).
+      const r = X.retrieveTargeted(c, task, { criteria, sections: SECTIONS[role], changed, maxContextTokens: 900 });
+      knowledge[role] = { text: r.text, tokens: r.tokens, hits: r.hits, stale: r.stale || 0, diag: r.diag };
     }
   }
   w.stages = defs.map((d, i) => {
     const sig = d.role === 'verify' ? signals.filter((x) => RISK_SIGNALS.includes(x)) : signals;
     const r = route(c, { agent: d.agent || undefined, category: d.category, signals: sig.join(','), model: o.model, sessionModel: o.sessionModel, record: false });
-    return { id: `S${i + 1}`, ...d, agent: r.agent, signals: sig, model: r.model, tier: r.tier, source: r.source, required: true, status: 'pending',
+    return { id: `S${i + 1}`, ...d, agent: r.agent, signals: sig, model: r.model, tier: r.tier, source: r.source, basis: r.basis || null, required: true, status: 'pending',
       attempts: 0, tries: 0, escalations: 0, routeId: null, input: null, handoff: null, runs: [], knowledge: knowledge[d.role] || { text: '', tokens: 0, hits: 0, stale: 0 } };
   });
   w.complexity = w.stages.reduce((t, s) => (['low', 'medium', 'high'].indexOf(s.tier) > ['low', 'medium', 'high'].indexOf(t) ? s.tier : t), 'low');
   if (!w.stages.length) w.status = 'direct';
   save(c, w);
   point(c, w);
-  await log(c, { event: 'workflow', id: w.id, status: w.status, category: w.category, complexity: w.complexity, risk, stages: w.stages.map((s) => `${s.agent}:${s.model}`) });
+  // Retrieval metadata only (counts; no task text, no query terms).
+  const rd = (s) => s.knowledge?.diag;
+  await log(c, { event: 'workflow', id: w.id, status: w.status, category: w.category, complexity: w.complexity, risk, stages: w.stages.map((s) => `${s.agent}:${s.model}`),
+    retrieval: w.stages.map((s) => rd(s) ? { stage: s.id, subtasks: rd(s).subtasks, criteria: rd(s).criteria, identifiers: rd(s).identifiers.length, matched: rd(s).matched, included: rd(s).included, reuse: rd(s).reuseShown, tokens: rd(s).tokens } : null).filter(Boolean) });
   return w;
 }
 
@@ -171,8 +176,13 @@ export function stagePackage(c, w, s) {
     for (const [k, label] of [['decisions', 'Decisions'], ['artifacts', 'Artifacts'], ['assumptions', 'Assumptions (not verified)'], ['openQuestions', 'Open questions']]) if (list(h[k])) lines.push(`${label}: ${list(h[k])}`);
   }
   lines.push(POLICY);
-  if (s.knowledge?.text) lines.push(s.knowledge.text);
+  const ids = s.knowledge?.diag?.identifiers || [];
+  lines.push(s.knowledge?.text || (NO_KNOWLEDGE + (ids.length ? ` Start from: ${ids.slice(0, 6).join(', ')}.` : '')));
+  // Reuse check for QA: what the implementation says it created that already exists in the knowledge graph.
+  const dup = s.role === 'verify' ? w.stages.flatMap((x) => x.duplicates || []) : [];
+  if (dup.length) lines.push(`Reuse check: the implementation reports creating ${dup.map((d) => `${d.name} (an existing ${d.type} ${d.existing} is recorded at ${d.where})`).join('; ')}. Confirm the existing one could not be reused or extended; otherwise report the duplication.`);
   lines.push('Return: end your reply with a fenced json hand-off {"summary": "…", "artifacts": [], "decisions": [], "assumptions": [], "openQuestions": [], "nodes": []'
+    + (s.role === 'implement' ? ', "reused": ["existing component/function/DTO/type used, with file"], "created": ["new function/type/file: why it could not be reused"], "inspected": ["source files you opened"], "explorationReason": "why files beyond the knowledge were needed, or empty"' : '')
     + (s.role === 'verify' ? `, "verdict": "pass|fail"${w.criteria.length ? ', "criteria": [{"id": "C1", "status": "pass|fail", "evidence": "file:line, test name or command output that proves it"}] — one entry per criterion; a criterion without evidence counts as not proven' : ''}` : '')
     + '}. Do not start other agents.');
   return lines.join('\n');
@@ -191,7 +201,7 @@ export async function start(c, id) {
     delete s.escalate;
   }
   r ||= route(c, { agent: s.agent, category: s.category, signals: s.signals.join(','), model: w.model || undefined, sessionModel: w.sessionModel, workflow: w.id });
-  Object.assign(s, { routeId: r.id, model: r.model, tier: r.tier, source: r.source, status: 'running', startedAt: now() });
+  Object.assign(s, { routeId: r.id, model: r.model, tier: r.tier, source: r.source, basis: r.basis || null, status: 'running', startedAt: now() });
   s.attempts++; // identifies this run (monotonic)
   s.tries = (s.tries || 0) + 1; // bounded by maxAttempts; reset when a failed verification returns work to this stage
   s.package = { text: stagePackage(c, w, s), injected: false };
@@ -257,7 +267,8 @@ export function stopCheck(c, sessionId, agentRunning) {
 async function storeHandoff(c, w, s, h) {
   if (!h || typeof h !== 'object' || !h.summary) fail('The stage hand-off needs at least a "summary" (JSON on stdin with --handoff -, or an existing --handoff H-id).');
   const P = await import('./project.mjs');
-  const keep = ['summary', 'artifacts', 'decisions', 'assumptions', 'openQuestions', 'nodes', 'verdict', 'criteria']; // QA: per-criterion results and evidence
+  // QA: per-criterion results and evidence. Implementation: what was reused, created and inspected (reporting only).
+  const keep = ['summary', 'artifacts', 'decisions', 'assumptions', 'openQuestions', 'nodes', 'verdict', 'criteria', 'reused', 'created', 'inspected', 'explorationReason'];
   const rec = Object.fromEntries(keep.filter((k) => h[k] !== undefined).map((k) => [k, h[k]]));
   const next = w.stages[w.stages.indexOf(s) + 1];
   const msg = P.addHandoff(c, { ...rec, from: s.agent, to: next?.agent || 'orchestrator', workflow: w.id, stage: s.id });
@@ -277,7 +288,7 @@ export async function done(c, id, stageId, o = {}) {
     if (o.handoffJson?.verdict && o.handoffJson.verdict !== o.status) fail(`The hand-off verdict is "${o.handoffJson.verdict}" but --status is ${o.status}.`);
   }
   const L = w.limits;
-  let next;
+  let next, note = null;
   if (o.status === 'pass') {
     // Evidence that the stage's agent actually ran (SubagentStop/PostToolUse, from its transcript); a stage done by the
     // main session itself, or not run at all, cannot pass.
@@ -294,6 +305,7 @@ export async function done(c, id, stageId, o = {}) {
       w.checks = checksOf(w).map((x) => ({ ...x, status: 'verified', evidence: short(res[x.id].evidence, 300), stage: s.id, agent: s.agent, attempt: s.attempts, handoff: h.id, at: now() }));
       s.criteriaPassed = w.criteria.length;
     }
+    if (s.role === 'implement') s.duplicates = duplicatesOf(c, o.handoffJson || readHandoffsSafe(c).find((x) => x.id === h.id) || {});
     Object.assign(s, { status: 'passed', handoff: h.id, endedAt: now() });
     next = w.stages.find((x) => x.status === 'pending') ? `rmc workflow start ${w.id}` : `rmc workflow finish ${w.id}`;
   } else {
@@ -319,7 +331,9 @@ export async function done(c, id, stageId, o = {}) {
     } else if (s.tries < L.maxAttempts) {
       s.status = 'pending';
       // One justified escalation per stage, through the existing escalation policy (adaptive models only).
-      if (h && s.escalations < 1 && s.source === 'adaptive' && o.escalate) s.escalate = { reason: short(o.reason) || 'stage failed', handoff: h.id };
+      // A failure from missing information is retried on the same model with the hand-off as context, never escalated.
+      if (o.escalate && isContextGap(o.reason)) note = `not escalated: "${short(o.reason, 80)}" is missing context, so the retry keeps ${s.model} and gets the hand-off as input`;
+      else if (h && s.escalations < 1 && s.source === 'adaptive' && o.escalate) s.escalate = { reason: short(o.reason) || 'stage failed', handoff: h.id };
       if (h) s.input = h.id;
       next = `rmc workflow start ${w.id}`;
     } else { s.status = 'failed'; w.status = 'failed'; w.failure = `stage ${s.id} failed ${s.tries} time(s) (maxAttempts ${L.maxAttempts})`; }
@@ -331,7 +345,8 @@ export async function done(c, id, stageId, o = {}) {
     requested: s.model, actual: run?.actual || [], mode: run?.mode || null, delegationId: run?.delegationId || null, handoff: h?.id || null,
     handoffTokens: h ? tokens(JSON.stringify(readHandoffsSafe(c).find((x) => x.id === h.id) || {})) : 0, failure: o.status === 'fail' ? short(o.reason) || 'not given' : null });
   if (w.status === 'failed') await log(c, { event: 'workflow', id: w.id, status: 'failed', failure: w.failure });
-  return { w, s, next: w.status === 'failed' ? null : next };
+  if (note) s.notes = [...(s.notes || []), note];
+  return { w, s, note, next: w.status === 'failed' ? null : next };
 }
 
 export async function finish(c, id) {
@@ -375,6 +390,24 @@ export async function cancel(c, id, reason) {
   return w;
 }
 
+// Names the implementation reports as newly created that the knowledge graph already holds (graph as of the last scan,
+// i.e. before this change): a hint for QA, never a verdict.
+function duplicatesOf(c, h) {
+  const created = (Array.isArray(h.created) ? h.created : []).map((x) => String(typeof x === 'string' ? x : x?.name || '')).filter(Boolean);
+  if (!created.length) return [];
+  let nodes = [];
+  try { nodes = readJson(c.nodes, []); } catch { return []; }
+  const KINDS = new Set(['function', 'class', 'type', 'interface', 'dto', 'component', 'service', 'module', 'enum', 'table', 'entity']);
+  const base = (n) => String(n).split(/[.#:/]/).filter(Boolean).at(-1)?.toLowerCase();
+  const out = [];
+  for (const raw of created.slice(0, 20)) {
+    const name = /^[`'"]?([A-Za-z_$][\w$.]*)/.exec(raw.trim())?.[1];
+    if (!name) continue;
+    const hit = nodes.find((n) => KINDS.has(n.type) && base(n.name) === base(name));
+    if (hit) out.push({ name: short(name, 80), existing: short(hit.name, 80), type: hit.type, where: `${hit.evidence?.[0]?.file || '?'}${hit.evidence?.[0]?.lines ? `:${hit.evidence[0].lines[0]}` : ''}` });
+  }
+  return out;
+}
 const proven = (r) => r && r.status === 'pass' && String(r.evidence || '').trim().length > 0;
 function results(c, h, o) {
   const src = o.handoffJson || readHandoffsSafe(c).find((x) => x.id === h.id) || {};
@@ -406,10 +439,20 @@ export async function formatStatus(c, w) {
   const x = await summary(c, w);
   const { E } = x;
   const lines = [`Workflow ${w.id} · ${w.status}${w.failure ? ` (${w.failure})` : ''} · ${w.category || 'no category'} · risk ${w.risk} · returns to implementation ${w.qaLoops}/${w.limits?.maxQaLoops ?? '?'}`,
-    '| Stage | Agent | Requested | Actual (transcript) | Mode | Status | Attempts | Tokens | Est. cost | Package | Knowledge |', '|---|---|---|---|---|---|---|---|---|---|---|'];
+    '| Stage | Agent | Tier | Requested | Actual (transcript) | Mode | Status | Attempts | Escalated | Tokens | Est. cost | Package | Knowledge |', '|---|---|---|---|---|---|---|---|---|---|---|---|---|'];
   for (const { s, cost, tokens: t } of x.stages) {
     const r = s.runs.at(-1);
-    lines.push(`| ${s.id} ${s.role} | ${s.agent} | ${s.model} | ${r?.actual?.join(', ') || (r ? 'unverified' : '—')} | ${r?.mode || '—'} | ${s.status} | ${s.attempts}${s.escalations ? ` (+${s.escalations} escalation)` : ''} | ${t.total ? t.total.toLocaleString('en-US') : '—'} | ${t.total ? E.costText(cost) : '—'} | ${s.package ? `${s.package.tokens} tokens${s.package.injected ? '' : ' (not injected)'}` : '—'} | ${s.knowledge.hits} hits${s.knowledge.stale ? `, ${s.knowledge.stale} stale` : ''} |`);
+    lines.push(`| ${s.id} ${s.role} | ${s.agent} | ${s.tier || '—'} | ${s.model} | ${r?.actual?.join(', ') || (r ? 'unverified' : '—')} | ${r?.mode || '—'} | ${s.status} | ${s.attempts} | ${s.escalations ? `yes (${s.escalations})` : 'no'} | ${t.total ? t.total.toLocaleString('en-US') : '—'} | ${t.total ? E.costText(cost) : '—'} | ${s.package ? `${s.package.tokens} tokens${s.package.injected ? '' : ' (not injected)'}` : '—'} | ${s.knowledge.hits} hits${s.knowledge.stale ? `, ${s.knowledge.stale} stale` : ''} |`);
+  }
+  // Why each requested model was chosen (routing basis); the actual model is only what the transcript shows.
+  lines.push('Model selection (requested; actual is the transcript column):', ...w.stages.map((s) => `- ${s.id} ${roleName(s.agent)}: ${s.model} — ${s.basis || s.source}${(s.notes || []).length ? ` · ${s.notes.join(' · ')}` : ''}`));
+  const hs = readHandoffsSafe(c).filter((h) => w.stages.some((s) => s.role === 'implement' && s.handoff === h.id));
+  const items = (k) => [...new Set(hs.flatMap((h) => (Array.isArray(h[k]) ? h[k] : []).map((v) => short(typeof v === 'string' ? v : JSON.stringify(v), 120))))];
+  if (hs.length) {
+    const fmt = (a) => (a.length ? a.join('; ') : 'none reported');
+    lines.push(`Reuse: existing reused: ${fmt(items('reused'))}`, `Reuse: new created: ${fmt(items('created'))}`, `Source files inspected: ${fmt(items('inspected'))}${hs.map((h) => h.explorationReason).filter(Boolean).length ? ` (reason: ${hs.map((h) => short(h.explorationReason, 160)).filter(Boolean).join('; ')})` : ''}`);
+    const dup = w.stages.flatMap((s) => s.duplicates || []);
+    if (dup.length) lines.push(`Possible duplicates (name already in the knowledge graph): ${dup.map((d) => `${d.name} ↔ ${d.type} ${d.existing} at ${d.where}`).join('; ')}`);
   }
   lines.push(`Main session: ${E.tok(x.main.tokens)} · ${E.costText(x.main.cost)}`, `Subagents: ${E.tok(x.subagents.tokens)} · ${E.costText(x.subagents.cost)}`,
     `Total: ${E.tok(x.total.tokens)} · ${E.costText(x.total.cost)} (estimated at API list prices; each API call counted once)`);
@@ -420,6 +463,20 @@ export async function formatStatus(c, w) {
   }
   if (w.knowledge) lines.push(`Knowledge write-back: hand-off ${w.knowledge.handoff}; ${w.knowledge.refreshed} changed file(s) re-scanned (${w.knowledge.refreshMode}).`);
   return lines.join('\n');
+}
+
+export function formatDiagnostics(s) {
+  const d = s.knowledge?.diag;
+  if (!d) return `Stage ${s.id}: no retrieval diagnostics recorded (planned before targeted retrieval, or no task text).`;
+  const e = d.eliminated;
+  return [`Retrieval diagnostics · stage ${s.id} ${roleName(s.agent)} (${s.role})`,
+    `- Subtasks: ${d.subtasks} · acceptance criteria: ${d.criteria} · query terms: ${d.terms}`,
+    `- Identifiers: ${d.identifiers.length ? d.identifiers.join(', ') : 'none'}`,
+    `- Candidates: ${d.candidates} · matched: ${d.matched} · included in the package: ${d.included}`,
+    `- Eliminated: below relevance ${e.belowRelevance} · lifecycle ended ${e.lifecycle} · outside the result limit ${e.outsideLimit} · not for this role ${e.roleSections} · section limit ${e.sectionLimit} · over budget ${e.budget}`,
+    ...d.eliminatedSample.map((x) => `  - ${x.id}: ${x.reason}`),
+    `- Reusable implementations detected: ${d.reuse.length ? d.reuse.join(', ') : 'none'} (shown: ${d.reuseShown})`,
+    `- Package knowledge: ${d.tokens} tokens${s.package ? ` · whole stage package: ${s.package.tokens} tokens` : ''}`].join('\n');
 }
 
 export function listWorkflows(c) {
@@ -455,7 +512,7 @@ export async function cli(c, sub, rest, args) {
       const r = await done(c, id, st, { status: args.status, handoff: args.handoff, handoffJson, reason: args.reason, criteria: args.criteria, escalate: args.escalate === true });
       if (json) return { workflow: r.w.id, status: r.w.status, stage: r.s.id, stageStatus: r.s.status, next: r.next };
       return r.w.status === 'failed' ? `Stage ${r.s.id} failed. Workflow ${r.w.id} FAILED: ${r.w.failure}. Report this to the user; do not present the task as done.`
-        : `Stage ${r.s.id} ${r.s.status === 'passed' ? 'passed' : `failed → ${r.s.role === 'verify' ? 'back to implementation' : 'retry'}`}. Next: ${r.next}`;
+        : `Stage ${r.s.id} ${r.s.status === 'passed' ? 'passed' : `failed → ${r.s.role === 'verify' ? 'back to implementation' : 'retry'}`}.${r.note ? ` Note: ${r.note}.` : ''} Next: ${r.next}`;
     }
     case 'finish': {
       const r = await finish(c, need(rest[0], 'finish <W-id>'));
@@ -465,6 +522,7 @@ export async function cli(c, sub, rest, args) {
     case 'context': {
       const w = loadWorkflow(c, need(rest[0], 'context <W-id> <S-id>'));
       const s = w.stages.find((x) => x.id === rest[1]) || fail(`Unknown stage ${rest[1]}.`);
+      if (args.diagnostics) return json ? (s.knowledge?.diag || null) : formatDiagnostics(s);
       return s.package?.text || stagePackage(c, w, s);
     }
     case 'status': {

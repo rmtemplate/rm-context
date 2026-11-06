@@ -14,6 +14,44 @@ Follow the `team-workflows` contract.
 3. Identify existing conventions (framework, structure, error handling, validation, logging, test style) and follow them.
 4. **Do not introduce a new framework or dependency** when the stack already covers the need. If one is needed, write an ADR with alternatives.
 
+## Reuse first, smallest correct change
+Work in this order: `.rmcontext/` knowledge, then targeted source inspection, then broader exploration only when necessary. Do not repeat source inspection an earlier stage already did.
+
+Before writing something new, search the knowledge (`rmc find`) and the code for what already does it:
+- **Frontend:** components, layouts, composables, API clients, stores, form/table/pagination/modal/dialog/dropdown components, validation, design tokens and CSS utilities.
+- **Backend:** controllers, services, repositories, DTOs, entities, guards/middleware/decorators, validators/transformers, exception handling, export/upload/download services.
+- **Shared code:** types, interfaces, enums, constants, formatters, date helpers, API response types, error definitions, configuration.
+- **Database:** entities, schema, migrations, relations, indexes, query builders, repository functions.
+
+Rules:
+- Reuse it when its behaviour fits. Extend it when it nearly fits, after checking its consumers (`rmc impact`). Do not change shared code in a way that breaks another consumer.
+- Do not re-define an existing DTO, type, interface, enum or constant, and do not copy business logic into a controller or the frontend when a service owns it.
+- Do not add a component for a slightly different look, a service for logic that already has a home, a wrapper without a clear benefit, or a helper used once.
+- No duplicate validation, state or API calls. No defensive code for conditions the existing contract already guarantees. No new file when the code belongs in an existing one. No dependency for something the stack already provides.
+- If the existing code cannot be used, say why before writing the alternative.
+
+Keep readability, type safety, needed error handling, authorization, business rules and the project's conventions. Short code must stay easy to read: no code golf.
+
+These examples show the principle. Adapt them to the project's own abstractions.
+
+```ts
+// Use the project's API composable when it already handles auth, base URL, errors and mapping
+const { data } = await useApi('/members', { query: { year: 2026 } })
+// …not fetch('/api/members?year=2026') plus hand-written ok checks and json unwrapping.
+
+// Use the existing DTO and service
+async findAll(query: MemberQueryDto) { return this.memberService.findAll(query) }
+// …not an inline { page?: number; limit?: number; search?: string } that re-defines MemberQueryDto,
+// and not a new database query in the controller when membershipService.findById(id) exists.
+```
+
+```vue
+<!-- The shared table already handles loading, pagination and errors -->
+<BaseDataTable :columns="columns" :rows="members" :loading="loading" />
+```
+
+Report what you reused (with file), what you created and why, the files you changed, and any duplication you could not avoid.
+
 ## Deliverables → template types
 | Deliverable | Type |
 |---|---|
@@ -36,4 +74,4 @@ Follow the `team-workflows` contract.
 - Report exactly which checks ran and their results. Never claim tests pass without running them.
 
 ## Review checklist
-Correctness and edge cases · input validation · authentication and authorisation · injection (SQL, command, template) · secrets in code · error handling and logging (no sensitive data) · concurrency and idempotency · performance (N+1 queries, unbounded loops or queries, missing indexes) · backward compatibility · test coverage of changed behaviour · consistency with requirements (RTM).
+Correctness and edge cases · input validation · authentication and authorisation · injection (SQL, command, template) · secrets in code · error handling and logging (no sensitive data) · concurrency and idempotency · performance (N+1 queries, unbounded loops or queries, missing indexes) · backward compatibility · test coverage of changed behaviour · consistency with requirements (RTM) · needless duplication or abstraction (an existing component, function, DTO or type could have been reused).

@@ -1,7 +1,7 @@
 ---
 name: business-analyst
 description: Business Analyst — elicits and analyses business objectives, stakeholders, processes, rules and requirements; produces BRD, FSD, SIPOC, process flows, stakeholder analysis, use cases, user stories, acceptance criteria, business rules catalog, gap analysis, scope and RTM. Use for requirement clarification, business discovery, or when business intent must be inferred from an existing codebase.
-model: opus
+model: sonnet
 skills: team-workflows, business-analysis, documentation-engine
 maxTurns: 40
 ---

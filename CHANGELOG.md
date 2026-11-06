@@ -55,6 +55,55 @@
   - `rmc route` prints an advisory efficiency line once benchmarks exist; the routed model never changes.
   - **Changed:** `rmc route baseline` now records a *declared* pair, shown but never verified; older `baselines.jsonl` entries are read the same way. The observational estimate stays in `rmc route report` and is never used for recommendations. The savings line moved from `rmc route stats` to `rmc route report` / `rmc route benchmark report`.
 
+### Added (CLAUDE.md strategies, existing-project policy update, targeted retrieval)
+- **CLAUDE.md strategy.** `/rmc:init` asks Combine (recommended) or Replace Entire File when a CLAUDE.md exists without the section.
+  - Replace needs `--confirm` and backs the old file up to `.rmcontext/backups/` first.
+  - `--claude-md skip` cancels. The choice is remembered as `claudeMdStrategy`, and a remembered replace is never applied again.
+  - The non-interactive default is combine.
+  - The marker carries a policy version (`CLAUDE_POLICY` 2; the first section counts as 1). `rmc claude-md --check` reports `missing / unmanaged / outdated / modified / duplicate / current` and never writes.
+- **Policy update for initialized projects.** `rmc init` (and `/rmc:init`) on an initialized project:
+  - no longer rescans
+  - updates the CLAUDE.md section and indexes only that file
+  - keeps knowledge, documents, hand-offs, workflows, telemetry and model overrides
+  - reports schema and extractor status, the kept overrides and stale files
+
+  `rmc init --full` still rescans. Agents, skills, commands and the model policy come from the active plugin; nothing is copied into projects.
+- **Targeted retrieval** for stage packages.
+  - It ranks per subtask, acceptance criterion and explicit identifier, merges and deduplicates the hits, and adds reuse candidates from the dependency graph in a *Reusable implementations* section.
+  - It respects confidence, freshness and lifecycle, and never pads results.
+  - `rmc workflow context <W> <S> --diagnostics` shows the counts, identifiers, eliminations by reason, reuse candidates and package size. Telemetry keeps counts only.
+- **Behaviour change.** `rmc init` on an initialized project used to run a full scan. It is now a policy update; use `--full` for the old behaviour. `rmc claude-md --check` now prints the state instead of a would-* action.
+
+### Changed (role-aware model routing)
+- **Complexity is not a model.** `rmc route` still computes a complexity tier (low/medium/high), and each agent's role policy (`roles` in `config/models.json`) now maps it to a model. Opus is a role's deep model, used only at high and only under that role's conditions (see the README table).
+  - Senior Engineer codes on Sonnet at every complexity. Opus is only for security-critical analysis (`sensitive`) or a fundamental architecture trade-off in `security`, `adr` or `code-review` tasks.
+  - Architecture and System Analyst use Opus for architecture, cross-system or ambiguous high-complexity work.
+  - QA stays on Sonnet, with Opus for security-critical verification. Quick QA uses Haiku. Documentation and PM use Haiku for simple updates.
+  - The Senior Engineer, System Analyst and Business Analyst agent defaults are now Sonnet.
+- The main session model is never a routing source, so an Opus main session no longer implies Opus subagents. An explicit `--model` (for example "use Opus for every stage") and project `models` / `tiers` / `roles` overrides still win.
+  - Routes and workflow stages record `basis` (why the model was chosen). `tier` is always the task's complexity, never derived from the model.
+  - The workflow report adds Tier, Escalated and a *Model selection* list. Requested and actual (transcript) models stay separate.
+- New signal `sensitive` (auth, authorization, payment, credentials, personal data), at least medium.
+- Escalation goes to the next stronger model the role allows, and a role on its strongest model is not escalated. A context-gap reason is refused: retry with context instead. `workflow done --escalate` with such a reason retries on the same model.
+- **Changed test expectations** (they encoded "high = Opus"):
+  - complex feature, refactor and security-touching fixes → Sonnet
+  - the notice for an Opus session delegating to the Senior Engineer is now a switch to Sonnet
+  - the BA default is Sonnet
+  - a trivial Senior Engineer change is Sonnet, not Haiku
+  - the security workflow's implementation stage is Sonnet
+  - the benchmark advisory for a user-chosen model is looked up by the task's complexity
+
+### Added (CLAUDE.md, knowledge-first and reuse-first policy)
+- `rmc init` writes a managed RM Context section (about 2,000 characters; roughly 560 tokens by the 3.5 characters per token estimate) into the project's `CLAUDE.md`, creating the file if needed. It covers knowledge first, provenance and freshness, reuse first, the smallest correct change, `/rmc:run` only for multi-stage work, hand-offs, and verification gates.
+  - It uses stable markers and is idempotent. Duplicates collapse, and user text and line endings are kept.
+  - New command: `rmc claude-md [--check]`. Opt out with `--no-claude-md` or `claudeMd: false`. The global `CLAUDE.md` is never touched.
+- **Workflow packages:**
+  - The knowledge-first policy: start from the hand-off and knowledge, re-read only `[stale]` files, and inspect only what is not covered.
+  - Targeted exploration when no knowledge matches.
+  - A smallest-correct-change, reuse-first implement goal, and a duplication check in the verify goal.
+- **Implement hand-offs:** `reused`, `created`, `inspected` and `explorationReason`. Created names that already exist in the graph are flagged to QA and in the report as possible duplicates.
+- **Agent instructions:** Senior Engineer, System Analyst, QA, Quick QA, `software-engineering` (*Reuse first, smallest correct change*, with examples) and `team-workflows` (role policy table, knowledge-first order).
+
 ### Fixed (`/rmc:run` planner and verification gate, smoke test W-mw5509w45u2)
 - A task that asked to analyse, implement a documentation fix and verify it was planned as a single Documentation stage, with no verification, although it had 3 acceptance criteria. The cause: the first matching keyword ("dokumentasi") decided the category, and `stagesFor('doc-update')` ignored code and criteria.
   - The planner now reads the task's intents (analysis, change, verification, code reference): analysis + change + verification → System Analyst → Senior Engineer → Quick QA.

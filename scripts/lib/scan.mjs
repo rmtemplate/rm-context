@@ -7,7 +7,7 @@ import { extract } from './extract.mjs';
 import { loadGraph, saveGraph, migrateGraph, edgeId, stats } from './graph.mjs';
 import { resolveRoutes } from './routes/resolve.mjs';
 
-const EXTRACTOR_VERSION = 5;
+export const EXTRACTOR_VERSION = 5;
 const CODE_LANGS = new Set(['js', 'php', 'py', 'go', 'java', 'rb', 'cs', 'rs', 'sql', 'prisma', 'manifest']);
 const JS_EXT = ['', '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.vue', '.svelte', '/index.ts', '/index.tsx', '/index.js', '/index.jsx'];
 const NODE_BUILTINS = new Set('assert buffer child_process cluster crypto dgram dns events fs http http2 https net os path perf_hooks process querystring readline stream string_decoder timers tls tty url util v8 vm worker_threads zlib'.split(' '));

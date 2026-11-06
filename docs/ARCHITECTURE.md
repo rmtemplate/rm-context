@@ -148,18 +148,28 @@ Progress, computed over leaf tasks (duration-weighted when every duration is kno
 
 `routing.mjs` keeps agent selection and model selection separate.
 - `rmc route --category <c> [--agent a] [--signals …]` maps the category to a default agent and a base tier (`config/models.json` `tasks`).
-- `classify()` applies the signals:
+- `classify()` applies the signals and returns the **complexity tier** only:
   - high: security, architecture, irreversible, debugging, cross-module, modules ≥ 3
-  - at least medium: ambiguous, code, modules = 2
+  - at least medium: ambiguous, code, sensitive, modules = 2
   - low: trivial or retrieval, unless ambiguous or a high signal
-- **Precedence:** `--model` → project `models.<agent>` → `agents.<agent>.override` → adaptive tier (`tiers`) → `agents.<agent>.model`.
+- `roleModel(cfg, agent, tier, signals, category)` maps the tier to a model with the role's policy (`roles.<agent>`: `low` / `medium` / `high`, plus `deep: { model, when, categories }`). The deep model applies only at high, when a `when` entry holds (`"a+b"` = all of them; the category counts as a condition), and only for the listed categories. A project `tiers` entry wins over the role policy; project `roles.<agent>` is merged over the plugin's.
+- **Precedence:** `--model` → project `models.<agent>` → `agents.<agent>.override` → role policy → `agents.<agent>.model`. `sessionModel` is never a source. Each route stores `basis` (why this model), `complexity`/`tier` (never derived from the model), `requested` (the user's model) and `model` (resolved). The actual model comes from the transcript (`delegation.mjs`).
 - **Supported values:** those in `supportedModels`. A `claude-<family>-…` id is passed as its family alias, since Claude Code's Agent tool takes aliases. Anything else falls back to `tiers[routing.fallbackTier]`, or to `inherit`.
-- **Escalation** (`--escalate R-id --reason … --handoff H-id`) needs:
-  - an adaptive source and a tier below high
+- **Escalation** (`--escalate R-id --reason … --handoff H-id`) moves to the next stronger model in the role's ladder (its tier models, then `deep.model`). It needs:
+  - an adaptive source and a stronger model the role allows
+  - a reason that is not a context gap (`isContextGap()`: "missing context", "kurang informasi", …); `workflow done --escalate` with such a reason retries on the same model with the hand-off as input
   - fewer than `maxEscalations` escalations
   - a route that was not already escalated
   - a reason not used before, and a hand-off
 - **Metrics:** `state/routing.jsonl` holds one metadata record per route; `rmc route stats` summarises them.
+- **CLAUDE.md** (`project.mjs`).
+  - `claudeMdState()` (read-only) returns `missing | unmanaged | outdated | modified | duplicate | current | disabled`, the policy version found (no version in the marker = policy 1), the number of user lines and `needsChoice`.
+  - `writeClaudeMd({ strategy, confirm })`:
+    - `combine` replaces all managed blocks with one at the first block's position, keeping the text outside and its line endings.
+    - `replace` (with user lines present) needs `confirm`, writes `.rmcontext/backups/CLAUDE.md.<time>.bak`, then writes the generated block only.
+    - An explicit strategy is stored as `claudeMdStrategy`. A stored strategy is never applied destructively again.
+  - `CLAUDE_POLICY` versions the section's text, separately from `GENERATOR`.
+- **`rmc init` on an initialized project** is a policy update: `initProject()` (adds only what is missing), then `writeClaudeMd()`, then `scan({ only: ['CLAUDE.md'] })` (targeted). It skips that scan when `EXTRACTOR_VERSION` changed, since the scan would then re-read every file. Then `policyReport()` (schema, extractor, kept overrides, `changedSinceScan()` count). `--full` keeps the full rescan. A new project writes CLAUDE.md before the first full scan.
 
 Every route reports `mainSessionModelChanged: false`. Subagent models never change the main session's model.
 
@@ -227,6 +237,17 @@ Every route reports `mainSessionModelChanged: false`. Subagent models never chan
   - Each stage is resolved by `route()` with `record: false`, so routes are recorded only when a stage starts.
   - Role-specific knowledge comes from `retrieve(c, task, { sections, changed, maxContextTokens: 900 })`.
   - A running workflow in the same session blocks a new plan; an unstarted plan is superseded.
+- **Targeted retrieval** (`context.mjs` `retrieveTargeted()`).
+  - `subtasksOf()` splits on sentence punctuation and connectors (then, lalu, kemudian…), plus one subtask per criterion. `identifiersOf()` takes backticked names, camel/Pascal/snake case, paths, routes, and exact graph names (length ≥ 5).
+  - Identifier matches score 0.95 (files 0.9). Each subtask goes through `rankNodes()` against `minimumRelevance`. Hits are merged by node id (best score, +0.02 per extra source), and retired nodes are dropped.
+  - From the 6 strongest hits, `depends_on` targets and the functions, classes, services and components defined there become reuse candidates (up to 3 per hit).
+  - Everything is rendered by `retrieve()` with `seed` and `reuse`: same budget, sections and labels, plus a *Reusable implementations* section (role key `reuse`).
+  - `diag` is stored on the stage's knowledge (counts, identifiers, node ids). The `workflow` log event gets counts only.
+- **Knowledge-first and reuse-first packages.**
+  - `POLICY` tells each agent to start from the hand-off and the role's knowledge entries, to re-read only `[stale]` files, and to inspect further files only for what the knowledge does not cover. With no matching knowledge, `NO_KNOWLEDGE` allows targeted inspection only.
+  - The implement goal asks for the smallest correct change, reusing existing code. The implement hand-off adds `reused`, `created`, `inspected` and `explorationReason`.
+  - On an implement pass, `duplicatesOf()` matches `created` names against function, class, entity and table nodes in the graph as of the last scan. The verify package then carries a *Reuse check* line. It is a hint for QA, never a verdict.
+  - `formatStatus()` prints, per stage: tier, requested model, actual model (transcript), escalated, and the routing `basis`. It also prints the reused, created and inspected lists and the possible duplicates.
 - **`start`.** Records the route (or one escalation through `route({ escalate })`), builds `stagePackage()` (goal, criteria, input hand-off, knowledge policy, knowledge) and points the session (`rmc-session-<sid>.json`) at the workflow.
 - **Hooks.**
   - `guard()` (PreToolUse, before the lock is taken): the started stage's agent, its model, once per attempt.

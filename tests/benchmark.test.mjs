@@ -248,11 +248,13 @@ test('benchmark run, evaluate, report, efficiency and the route advisory, end to
   assert.match(eff, /Recommendation: Delegated quick-qa \(claude-haiku-5-5\)\nReason: Historical delegated execution is cheaper with comparable task quality\./);
   // Advisory on rmc route: the routed model is unchanged.
   const plain = JSON.parse(cli(dir, 'route', '--agent', 'senior-engineer', '--category', 'debugging', '--json', '--no-record').out);
-  assert.equal(plain.model, 'opus', 'adaptive routing is unchanged by benchmarks');
+  assert.equal(plain.model, 'sonnet', 'adaptive routing (Senior Engineer role policy) is unchanged by benchmarks');
   const routed = cli(dir, 'route', '--agent', 'senior-engineer', '--category', 'debugging', '--session-model', 'claude-opus-5-5', '--no-record');
-  assert.match(routed.out, /- Model: Opus[\s\S]*Efficiency \(advisory, routing unchanged\): Insufficient historical benchmark data\. Using existing adaptive routing policy\./, 'no profile for the high tier');
+  assert.match(routed.out, /- Model: Sonnet[\s\S]*Efficiency \(advisory, routing unchanged\): Insufficient historical benchmark data\. Using existing adaptive routing policy\./, 'no profile for the high tier');
   const user = JSON.parse(cli(dir, 'route', '--agent', 'senior-engineer', '--category', 'debugging', '--model', 'sonnet', '--session-model', 'claude-opus-5-5', '--json', '--no-record').out);
-  assert.deepEqual([user.model, user.source, user.efficiency.text], ['sonnet', 'user', 'Delegated quick-qa (claude-haiku-5-5)'], 'the user model stands; the recommendation is advice only');
+  // The user model stands. The advisory is looked up by the task's complexity (debugging is high), not by the requested
+  // model, so there is no profile for it here; the recommendation itself is covered by "route efficiency" above.
+  assert.deepEqual([user.model, user.source, user.complexity, user.efficiency.text], ['sonnet', 'user', 'high', 'Insufficient historical benchmark data. Using existing adaptive routing policy.'], 'the user model stands; the recommendation is advice only');
   const full = cli(dir, 'route', 'report').out;
   assert.match(full, /Routing distribution:/);
   assert.match(full, /SAVINGS STATUS: VERIFIED/);

@@ -113,7 +113,7 @@ The agent is picked from the work being done:
    | Security-sensitive change | Security analysis → Senior Engineer → QA verification |
    | Review, document, plan | The category's own agent |
 
-   A stated intent wins over a single keyword: "analyse …, fix the documentation …, then verify" is a change workflow, not a documentation one. A plan with acceptance criteria always gets a verification stage. High-risk work is always verified by `qa` instead of Quick QA. Each stage's model comes from the usual precedence: user → project → agent override → adaptive tier → agent default. The main session keeps its own model.
+   A stated intent wins over a single keyword: "analyse …, fix the documentation …, then verify" is a change workflow, not a documentation one. A plan with acceptance criteria always gets a verification stage. High-risk work is always verified by `qa` instead of Quick QA. Each stage's model comes from the usual precedence: user → project → agent override → role policy → agent default. The main session keeps its own model, and an Opus main session does not make the stages Opus.
 2. **Run each stage.**
    - `rmc workflow start` records the stage's route and prints the exact Agent call.
    - The main session makes that call in the foreground.
@@ -138,13 +138,30 @@ The agent is picked from the work being done:
 
 ## Adaptive model routing
 
-Choosing the agent and choosing the model are separate decisions. The CLI picks a tier from the task category and its complexity signals:
+Choosing the agent and choosing the model are separate decisions. The CLI picks a **complexity tier** (low / medium / high) from the task category and its signals. Then the agent's **role policy** maps that tier to a model. High complexity is not Opus by itself.
 
-| Request | Agent | Model |
-|---|---|---|
-| "Generate an FSD for a booking feature" | Business Analyst | Sonnet (medium) |
-| "Where are users created?" | Quick Q&A | Haiku (low) |
-| "Implement a complex payment gateway" | Senior Engineer | Opus (high) |
+| Request | Agent | Tier | Model |
+|---|---|---|---|
+| "Generate an FSD for a booking feature" | Business Analyst | medium | Sonnet |
+| "Where are users created?" | Quick Q&A | low | Haiku |
+| "Implement a complex payment gateway" | Senior Engineer | high | Sonnet (coding stays on Sonnet) |
+| "Threat-model the payment authorization flow" | Senior Engineer (security) | high | Opus (security-critical analysis) |
+| "Design the architecture for multi-tenant billing" | Architecture | high | Opus |
+
+**Role policy** (`roles` in `config/models.json`; `rmc routing` prints it). Opus is a role's *deep* model. It is used only at the high tier, and only when one of the role's conditions holds:
+
+| Role | low | medium | high | Opus when (high only) |
+|---|---|---|---|---|
+| Senior Engineer | Sonnet | Sonnet | Sonnet | `sensitive`, `architecture`+`ambiguous` or `architecture`+`cross-module`, for `security`, `adr` and `code-review` only. Never for implementation size |
+| System Analyst | Sonnet | Sonnet | Sonnet | `ambiguous`, `cross-module` or `architecture` |
+| Architecture | Sonnet | Sonnet | Sonnet | an architecture task, `irreversible`, `infra-design`, or `cross-module`+`ambiguous` |
+| QA | Sonnet | Sonnet | Sonnet | `security`+`sensitive` or `security`+`irreversible` |
+| Quick QA | Haiku | Haiku | Sonnet | — |
+| Documentation, Project Manager | Haiku | Sonnet | Sonnet | escalation only |
+| Business Analyst | Haiku | Sonnet | Sonnet | `ambiguous`+`cross-module` |
+| DevOps Engineer | Haiku | Sonnet | Sonnet | `infra-design`, `security` or `irreversible` |
+
+For a hard design question, route the analysis to the System Analyst or Architecture on Opus, then hand the implementation back to the Senior Engineer on Sonnet. These defaults are a policy, not a measured saving. Compare real usage with `rmc route benchmark` before drawing cost conclusions.
 
 ```bash
 rmc route --category fsd
@@ -154,18 +171,38 @@ rmc route categories            # categories, tiers and signals
 
 - **Complexity signals:**
   - `security`, `architecture`, `irreversible`, `debugging`, `cross-module` and `modules:3`+ raise the task to **high**.
-  - `ambiguous`, `code` and `modules:2` keep it at least **medium**.
+  - `ambiguous`, `code`, `sensitive` (auth, authorization, payment, credentials, personal data) and `modules:2` keep it at least **medium**.
   - `trivial` or `retrieval` lower it to **low**, unless a high signal is present.
 - **Precedence:**
   1. The user's explicit `--model`.
   2. The project override `.rmcontext/config.json` → `models.<agent>`.
   3. The agent override `config/models.json` → `agents.<agent>.override`.
-  4. The adaptive tier.
+  4. The role policy for the complexity tier. A project-wide `tiers` mapping in `.rmcontext/config.json` counts as a project override and wins over it; `roles.<agent>` in the same file overrides one role.
   5. The agent default.
 
-  Unsupported values fall back to `routing.fallbackTier`.
-- **Escalation.** `rmc route --escalate <R-id> --reason "…" --handoff <H-id>` moves one subtask up a tier, at most `maxEscalations` times, and carries the previous agent's hand-off forward so the work isn't repeated.
+  The main session model is not part of this list. It is recorded as `sessionModel` and used only for the notice, and for the `inherit` fallback. Each route records its `basis`, for example `senior-engineer role policy: high → sonnet`. The model that actually ran is read from the subagent transcript afterwards. Unsupported values fall back to `routing.fallbackTier`.
+- **Escalation.** `rmc route --escalate <R-id> --reason "…" --handoff <H-id>` moves one subtask to the next stronger model its role allows, at most `maxEscalations` times. It carries the previous agent's hand-off forward so the work isn't repeated. A role already on its strongest model is not escalated. A reason that describes missing context ("missing context", "kurang informasi") is refused: retry on the same model with that context instead.
 - **Metrics.** `rmc route stats` reports routes by tier, agent and category, plus escalations, context reuse and agents per workflow. It also separates suggestions generated, followed, ignored (direct response) and outcome unknown; delegations through `rmc route` versus direct agent calls; actual model verified versus unavailable; foreground runs; and rejected background or concurrent calls. A **Routing efficiency** block adds actual token usage, estimated cost and the direct-vs-delegated comparison (see below). A metric with no telemetry shows as `unavailable`, not an estimate. Only metadata is stored; never prompts or code.
+
+### Targeted retrieval for workflow stages
+
+A long task dilutes every single term, so a helper named once among many words could fall below the relevance threshold. Stage packages from `/rmc:run` therefore use targeted retrieval (`retrieveTargeted`):
+1. The task is split into subtasks (its clauses), plus one per acceptance criterion.
+2. Explicit identifiers are extracted: backticked names, camelCase, PascalCase and snake_case names, file paths, routes, and task words that are exactly the name of a function, class, service, entity or table in the graph.
+3. Each subtask and each identifier is ranked on its own. The results are merged and deduplicated, and the best score wins.
+4. The dependency graph adds what the strongest hits already import. These are reuse candidates, shown first under **Reusable implementations**.
+
+Retrieval still respects confidence (`[inferred]`), freshness (`[stale]`) and the role's sections and token budget. Nodes whose lifecycle ended (`attrs.lifecycle`/`status`: deprecated, removed, superseded) are left out. Nothing below the threshold is added to fill the list. With no match, the package allows only targeted inspection, never a full scan.
+
+`rmc workflow context <W-id> <S-id> --diagnostics` shows, per stage:
+- the subtasks, criteria and query-term count
+- the identifiers
+- candidates, matched and included
+- eliminations by reason (below relevance, lifecycle, result limit, role, section limit, budget)
+- the reusable implementations detected
+- the package size
+
+Telemetry stores counts only, never the task text or its terms.
 
 ### Routing suggestions for ordinary prompts (Claude Code)
 
@@ -224,7 +261,31 @@ A profile is **VERIFIED** with at least 3 valid pairs (5–10 recommended), **IN
 
 ## Persistent project knowledge
 
-`rmc init` creates `.rmcontext/` in your repository. `rmc refresh` re-reads only changed files. Knowledge and documents linked to those files are flagged for review. Commit the folder so your whole team and every agent share the same context.
+`rmc init` creates `.rmcontext/` in your repository. `rmc refresh` re-reads only changed files.
+
+`rmc init` also adds a short **RM Context section** (about 2,000 characters; roughly 560 tokens at the 3.5 characters per token estimate rmc uses) to the project's `CLAUDE.md`, and creates the file if needed. The section tells Claude Code to:
+- read `.rmcontext/` before exploring source, then inspect only what the knowledge does not cover; no full scan while it is fresh
+- check provenance, confidence and freshness, and treat source as the source of truth
+- reuse existing components, functions, DTOs and types, and make the smallest correct change
+- do simple work directly, and use `/rmc:run` for multi-stage work
+- pass hand-offs, and count a stage as done only when its verification gate passes
+
+**When a `CLAUDE.md` already exists,** `/rmc:init` asks how to manage it:
+- **Combine (recommended).** Everything already in the file is kept, and the RM Context managed section is added. Later runs change only the text between `<!-- BEGIN RM CONTEXT · policy N … -->` and `<!-- END RM CONTEXT -->`, keeping your line endings.
+- **Replace Entire File.** The whole file becomes the generated version. This happens only after a warning and an explicit confirmation (`--claude-md replace --confirm`), and the old file is first backed up to `.rmcontext/backups/`.
+
+Cancelling (`--claude-md skip`) leaves the file alone. The choice is remembered as `claudeMdStrategy` in `.rmcontext/config.json`. A remembered replace never replaces again: later runs update only the managed section. Without a way to ask (non-interactive), the default is combine. Both modes are idempotent.
+
+Opt out with `rmc init --no-claude-md` or `"claudeMd": false`. The global `~/.claude/CLAUDE.md` is never touched.
+
+**Policy version.** The marker carries the policy version of the section's text (`CLAUDE_POLICY`), independent of the plugin version. `rmc claude-md --check` never writes. It reports one of these states: `missing`, `unmanaged`, `outdated` (older policy), `modified` (edited by hand), `duplicate` or `current`. `rmc claude-md [--strategy combine|replace] [--confirm]` updates the section.
+
+**Existing projects (policy update).** Running `rmc init` or `/rmc:init` on a project that already has `.rmcontext/` is a policy update, not a re-initialization:
+- no scan; the graph, knowledge, documents, hand-offs, workflows and telemetry are unchanged
+- the CLAUDE.md managed section is brought to the current policy, and only `CLAUDE.md` is indexed (a targeted scan of that one file)
+- it reports the schema, extractor upgrades pending, the model overrides it kept, and files changed since the last scan; stale files are not re-read implicitly
+
+Agents, skills, commands and the model policy always come from the active plugin. Nothing is copied into the project, so a plugin update applies to existing projects right away. A full rescan happens only on request: `rmc init --full` or `rmc refresh --full`. Knowledge and documents linked to those files are flagged for review. Commit the folder so your whole team and every agent share the same context.
 
 ## Automatic context (Claude Code)
 
@@ -610,6 +671,7 @@ Run `rmc help` for the full reference. All commands run in the current directory
 | Command | Purpose |
 |---|---|
 | `rmc init` · `rmc refresh [--full]` | Create `.rmcontext/` and scan, or rescan only changed files |
+| `rmc claude-md [--check] [--strategy combine\|replace] [--confirm]` | Create or update the managed RM Context section in `./CLAUDE.md`; `--check` reports its state and never writes |
 | `rmc status [--json]` · `rmc validate` | Freshness and coverage; validate manifest, config, graph, documents and plan |
 | `rmc find <terms…>` | Search the graph, documents and context notes |
 | `rmc impact <id\|file> [--changed] [--out file.md]` | Change impact report |
@@ -659,7 +721,10 @@ To approve a document, say so in chat, e.g. *"Approve FSD-001, approved by Jane 
 | `maxFileBytes` | Files larger than this are skipped |
 | `routing` | Overrides plugin routing settings, e.g. `{ "enabled": false }`, `{ "maxEscalations": 2 }` or `{ "noticeLanguage": "en" }` (delegation notice language: `id` default, `en`). `autoSuggest` (default `true`) turns routing suggestions for ordinary prompts on or off; `suggestMinConfidence` (default `0.7`) is their threshold |
 | `delegation` | `{ "background": "allow" }` lets RM Context agents run in the background or in parallel. Default: denied (foreground, one at a time). `RMC_ALLOW_BACKGROUND=1` does the same for one shell |
-| `tiers` | Overrides the tier → model mapping, e.g. `{ "medium": "opus" }` |
+| `tiers` | Project-wide tier → model mapping for every role, e.g. `{ "medium": "opus" }`. It wins over the role policy |
+| `roles` | Overrides one role's policy, e.g. `{ "senior-engineer": { "high": "opus" } }`. Keys: `low`, `medium`, `high`, `deep` (`{ "model", "when", "categories" }`) |
+| `claudeMd` | `false` stops `rmc init` / `rmc claude-md` from writing the RM Context section in `CLAUDE.md` |
+| `claudeMdStrategy` | `combine` or `replace`: the remembered answer to the CLAUDE.md question. A remembered `replace` never replaces again |
 | `autoContext` | Automatic context settings for Claude Code. See [Automatic context](#automatic-context-claude-code) |
 
 **Plugin defaults: `config/models.json`.**
@@ -674,6 +739,8 @@ To approve a document, say so in chat, e.g. *"Approve FSD-001, approved by Jane 
 
 The same file also holds:
 - `agents`: each agent's default model, used when a delegation has no category, plus an optional `override` that pins the agent
+- `roles`: each role's complexity tier → model policy, with its optional `deep` (Opus) conditions
+- `tiers`: the generic mapping, for an agent without a role policy
 - `tasks`: each category's tier and default agent
 
 ## Project storage structure

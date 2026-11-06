@@ -124,9 +124,10 @@ test('feature: System Analyst → Senior Engineer → Quick QA, each with its mo
 
   const fin = run(p, ['workflow', 'finish', w.id]);
   assert.match(fin, /Workflow W-\w+ completed\./);
-  assert.match(fin, /\| S1 analysis \| system-analyst \| sonnet \| claude-sonnet-5-5 \| foreground \| passed \| 1 \|/);
-  assert.match(fin, /\| S2 implement \| senior-engineer \| sonnet \| claude-sonnet-5-5 \| foreground \| passed \| 2 \|/);
-  assert.match(fin, /\| S3 verify \| quick-qa \| haiku \| claude-haiku-5-5 \| foreground \| passed \| 2 \|/);
+  assert.match(fin, /\| S1 analysis \| system-analyst \| medium \| sonnet \| claude-sonnet-5-5 \| foreground \| passed \| 1 \| no \|/);
+  assert.match(fin, /\| S2 implement \| senior-engineer \| medium \| sonnet \| claude-sonnet-5-5 \| foreground \| passed \| 2 \| no \|/);
+  assert.match(fin, /\| S3 verify \| quick-qa \| low \| haiku \| claude-haiku-5-5 \| foreground \| passed \| 2 \| no \|/);
+  assert.match(fin, /- S2 Senior Engineer: sonnet — senior-engineer role policy: medium → sonnet/);
   // 5 agent runs × one API call of 1,150 tokens: every call counted once, although each run was seen by PostToolUse and SubagentStop.
   assert.match(fin, /Subagents: 5,750 tokens/);
   const events = readJsonl(path.join(p.dir, '.rmcontext/state/autocontext.jsonl'));
@@ -182,7 +183,8 @@ test('an explicit user model is used for every stage; high-risk work is verified
   assert.match(agent(p, 'system-analyst', 'sonnet').denied, /pass model "opus"/);
   run(p, ['workflow', 'cancel', w.id]);
   const s = plan(p, 'fix the security vulnerability in the users endpoint authentication');
-  assert.deepEqual(s.stages.map((x) => [x.role, x.agent, x.model]), [['analysis', 'senior-engineer', 'opus'], ['implement', 'senior-engineer', 'opus'], ['verify', 'qa', 'opus']]);
+  // Security-critical (authentication): analysis and verification on Opus; the implementation goes back to Sonnet.
+  assert.deepEqual(s.stages.map((x) => [x.role, x.agent, x.model]), [['analysis', 'senior-engineer', 'opus'], ['implement', 'senior-engineer', 'sonnet'], ['verify', 'qa', 'opus']]);
   assert.equal(s.risk, 'high');
 });
 
@@ -212,7 +214,7 @@ test('the one-agent lock holds until the background agent finishes; background r
   run(p, ['workflow', 'start', w.id]);
   agent(p, 'system-analyst', 'sonnet', { background: true });
   run(p, ['workflow', 'done', w.id, 'S1', '--status', 'pass', '--handoff', '-'], HANDOFF());
-  assert.match(run(p, ['workflow', 'finish', w.id]), /\| S1 analysis \| system-analyst \| sonnet \| claude-sonnet-5-5 \| background \| passed \|/);
+  assert.match(run(p, ['workflow', 'finish', w.id]), /\| S1 analysis \| system-analyst \| medium \| sonnet \| claude-sonnet-5-5 \| background \| passed \|/);
 });
 
 test('cancellation stops later stages; an unfinished workflow is reported at Stop, never as successful', () => {

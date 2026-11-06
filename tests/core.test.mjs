@@ -68,7 +68,7 @@ test('refresh is incremental, flags stale agent knowledge and documents, and dro
   const out = ok(dir, 'refresh');
   r = readJson(path.join(dir, '.rmcontext/state/scan.json'));
   assert.deepEqual([r.files.added, r.files.changed, r.files.deleted], [1, 2, 0]); // p.json added, 2 changed
-  assert.equal(r.files.indexed, 15);
+  assert.equal(r.files.indexed, 16); // includes the CLAUDE.md that rmc init writes
   assert.match(out, /Documents needing review.*TD-001/);
   const g = graph(dir);
   assert.ok(g.nodes.find((n) => n.id === 'api:DELETE /users/:id'));

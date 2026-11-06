@@ -145,25 +145,28 @@ test('notice announces a switch only when the subagent model differs from the ma
   const notice = (...a) => /^Notice: (.*)$/m.exec(ok(dir, 'route', ...a))[1];
   assert.equal(notice('--agent', 'quick-qa', '--category', 'search', '--session-model', 'claude-opus-5-5'), 'Perpindahan ke model Haiku, karena bertugas sebagai Quick QA.');
   assert.equal(notice('--agent', 'business-analyst', '--category', 'sipoc', '--session-model', 'opus'), 'Perpindahan ke model Sonnet, karena bertugas sebagai Business Analyst.');
-  assert.equal(notice('--agent', 'senior-engineer', '--category', 'complex-feature', '--session-model', 'opus'), 'Delegasi ke Senior Engineer dengan model Opus, sama dengan model sesi utama (tidak ada perpindahan model).');
+  // An Opus main session does not make the Senior Engineer Opus: coding stays on Sonnet. Architecture on Opus is the same model.
+  assert.equal(notice('--agent', 'senior-engineer', '--category', 'complex-feature', '--session-model', 'opus'), 'Perpindahan ke model Sonnet, karena bertugas sebagai Senior Engineer.');
+  assert.equal(notice('--agent', 'architecture', '--category', 'architecture', '--session-model', 'opus'), 'Delegasi ke Architecture dengan model Opus, sama dengan model sesi utama (tidak ada perpindahan model).');
   // The user's explicit model wins over routing, and the notice follows it.
   assert.equal(notice('--agent', 'quick-qa', '--category', 'search', '--model', 'sonnet', '--session-model', 'opus'), 'Perpindahan ke model Sonnet, karena bertugas sebagai Quick QA.');
   const f = path.join(dir, '.rmcontext/config.json');
   fs.writeFileSync(f, JSON.stringify({ ...readJson(f), routing: { noticeLanguage: 'en' } }));
   assert.equal(notice('--agent', 'quick-qa', '--category', 'search', '--session-model', 'opus'), 'Switching to Haiku, acting as Quick QA.');
-  assert.equal(notice('--agent', 'senior-engineer', '--category', 'complex-feature', '--session-model', 'claude-opus-5-5'), 'Delegating to Senior Engineer with Opus, same as the main session model.');
+  assert.equal(notice('--agent', 'architecture', '--category', 'architecture', '--session-model', 'claude-opus-5-5'), 'Delegating to Architecture with Opus, same as the main session model.');
   const out = ok(dir, 'route', '--agent', 'qa', '--category', 'qa');
   assert.match(out, /in the foreground \(never run_in_background\), one agent at a time/);
   const logged = fs.readFileSync(path.join(dir, '.rmcontext/state/routing.jsonl'), 'utf8');
   assert.doesNotMatch(logged, /Perpindahan|Switching|notice/, 'routing log holds metadata, not the notice text');
 });
-test('adaptive routing is unchanged: retrieval → haiku, structured analysis → sonnet, complex → opus', () => {
+test('role-aware routing: retrieval → haiku, structured analysis → sonnet, coding → sonnet, architecture → opus', () => {
   const dir = fixture('node-app'); ok(dir, 'init');
   const model = (...a) => JSON.parse(ok(dir, 'route', ...a, '--json', '--no-record')).model;
   assert.equal(model('--category', 'search'), 'haiku');
   assert.equal(model('--category', 'fsd'), 'sonnet');
-  assert.equal(model('--category', 'complex-feature'), 'opus');
-  assert.equal(model('--category', 'bug-fix', '--signals', 'security'), 'opus');
+  assert.equal(model('--category', 'complex-feature'), 'sonnet');
+  assert.equal(model('--category', 'bug-fix', '--signals', 'security'), 'sonnet');
+  assert.equal(model('--category', 'architecture'), 'opus');
 });
 
 // ---------- command instructions ----------

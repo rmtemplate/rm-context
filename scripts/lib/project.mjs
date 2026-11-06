@@ -38,13 +38,18 @@ export function resolveRouting(c) {
     rows.push({ agent, model, source, reason: def.reason });
   }
   for (const k of Object.keys(project)) if (!defaults.agents[k]) warnings.push(`Unknown agent in config.models: ${k}`);
-  return { rows, fallback: defaults.fallback, warnings };
+  const projRoles = fs.existsSync(c.config) ? readJson(c.config).roles || {} : {};
+  const roles = Object.entries(defaults.roles || {}).map(([agent, pol]) => ({ agent, ...pol, ...(projRoles[agent] || {}) }));
+  return { rows, roles, fallback: defaults.fallback, warnings };
 }
 export function formatRouting(r) {
-  return ['Agent default models (used when a delegation has no task category; with a category, rmc route picks the tier):', '',
+  return ['Agent default models (used when a delegation has no task category; with a category, rmc route uses the role policy below):', '',
     '| Agent | Model | Source | Reason |', '|---|---|---|---|',
     ...r.rows.map((x) => `| ${x.agent} | ${x.model} | ${x.source} | ${x.reason} |`), '',
-    `Fallback: ${r.fallback.join(' → ')}`, 'Subagent models never change the main session model.',
+    ...(r.roles.length ? ['', 'Role policy (with a task category: complexity tier → model; Opus as the "deep" model only at high, when a condition holds):', '',
+      '| Agent | low | medium | high | Deep model when (high only) | Reason |', '|---|---|---|---|---|---|',
+      ...r.roles.map((x) => `| ${x.agent} | ${x.low} | ${x.medium} | ${x.high} | ${x.deep ? `${x.deep.model}: ${(x.deep.when || []).join(', ') || 'by escalation only'}${x.deep.categories ? ` (categories: ${x.deep.categories.join(', ')})` : ''}` : '—'} | ${x.reason || ''} |`)] : []), '',
+    `Fallback: ${r.fallback.join(' → ')}`, 'Subagent models never change the main session model, and the main session model is not used for subagents unless you name it (--model).',
     ...r.warnings.map((w) => `Warning: ${w}`)].join('\n');
 }
 
@@ -252,6 +257,15 @@ export function validateAll(c) {
       if (!TIERS.includes(k)) cfg.errors.push(`config.tiers.${k}: tiers are ${TIERS.join(', ')}`);
       else if (typeof v !== 'string') cfg.errors.push(`config.tiers.${k} must be a model alias or claude-* id`);
     }
+    const MODEL = (v) => typeof v === 'string' && (['opus', 'sonnet', 'haiku', 'inherit'].includes(v) || /^claude-[a-z0-9.-]+$/.test(v));
+    for (const [a, pol] of Object.entries(conf.roles || {})) {
+      if (!AGENTS.includes(a)) { cfg.errors.push(`config.roles.${a}: unknown agent (${AGENTS.join(', ')})`); continue; }
+      for (const [k, v] of Object.entries(pol || {})) {
+        if (TIERS.includes(k)) { if (!MODEL(v)) cfg.errors.push(`config.roles.${a}.${k} must be a model alias or claude-* id`); }
+        else if (k === 'deep') { if (v && (!MODEL(v.model) || (v.when && !Array.isArray(v.when)))) cfg.errors.push(`config.roles.${a}.deep needs { "model": <alias>, "when": [signal or "a+b"], "categories"?: [] }`); }
+        else if (k !== 'reason') cfg.errors.push(`config.roles.${a}.${k}: keys are low, medium, high, deep, reason`);
+      }
+    }
     for (const k of ['defaultTier', 'fallbackTier']) if (conf.routing?.[k] && !TIERS.includes(conf.routing[k])) cfg.errors.push(`config.routing.${k} must be one of ${TIERS.join(', ')}`);
   } catch (e) { cfg.errors.push(e.message); }
   r.config = cfg;
@@ -260,4 +274,117 @@ export function validateAll(c) {
   try { r.plan = fs.existsSync(c.plan) ? validatePlan(c, readJson(c.plan)) : { errors: [], warnings: ['no plan.json (optional)'] }; } catch (e) { r.plan = { errors: [e.message], warnings: [] }; }
   r.handoffs = { errors: readHandoffs(c).filter((h) => h.invalid).map((h) => `handoffs.jsonl line ${h.invalid} is not valid JSON`), warnings: [] };
   return r;
+}
+
+// ---------- CLAUDE.md managed section ----------
+// rmc init writes a short, stable section into the project's own CLAUDE.md (never the user's global one).
+// Strategies (asked by /rmc:init when a CLAUDE.md already exists; non-interactive default: combine):
+// - combine: everything outside the markers is the user's and is kept byte for byte; only the section is replaced.
+// - replace: the whole file becomes the generated section, only with an explicit confirmation and after a backup.
+// The chosen strategy is remembered (config.json claudeMdStrategy) so the question is not asked again; a remembered
+// "replace" never replaces again — later runs update the managed section only. Re-running is a no-op.
+// CLAUDE_POLICY versions the section's policy text; it is independent of the plugin release version.
+export const CLAUDE_POLICY = 2;
+export const CLAUDE_BEGIN = `<!-- BEGIN RM CONTEXT · policy ${CLAUDE_POLICY} · managed by rmc (rmc claude-md); edits between these markers are replaced -->`;
+export const CLAUDE_END = '<!-- END RM CONTEXT -->';
+export const CLAUDE_SECTION = `## RM Context
+
+Project knowledge for this repository is in \`.rmcontext/\` (start at \`.rmcontext/INDEX.md\`; \`rmc find <terms>\`, \`rmc impact <file|id>\`; the \`rmc\` command line is in the session context).
+
+- **Knowledge first.** For project work, read the relevant \`.rmcontext/\` knowledge (manifest, context notes, modules, APIs, data, graph, flows, references) before exploring source. Start from it, then open only the files it does not cover. No full scan while it is fresh, except for initial discovery, large invalidation, cross-cutting restructuring or an explicit full audit.
+- **Check it.** Weigh provenance, confidence (\`[inferred]\` is a heuristic), lifecycle and freshness. Source, schema, config and actual behaviour win; stale or contradicted knowledge → targeted source check, then \`rmc refresh\`. Never invent knowledge that is not there.
+- **Reuse first.** Before writing something new, find the existing component, function, service, DTO, type, constant or utility that does it; extend it when it nearly fits (check its consumers). If you cannot reuse it, say why.
+- **Smallest correct change.** Use existing abstractions; no speculative abstractions, one-use helpers, wrappers, duplicate validation/state/API calls, or new files and dependencies without need. Never trade away readability, types, error handling, authorization or business rules.
+- **Agents.** Simple questions and small edits: do them directly. Multi-stage work (analysis → implementation → verification) or cross-module changes: use or suggest \`/rmc:run <task>\`. RM Context routing lines are advice.
+- **Workflows.** Pass hand-offs between stages instead of repeating analysis. A stage is done only when its verification gate passes with evidence, never because a tool call succeeded. Verified new findings go back through the workflow write-back or \`rmc refresh\`.`;
+const BLOCK_RX = /<!-- BEGIN RM CONTEXT[^\n]*?-->[\s\S]*?<!-- END RM CONTEXT -->/g;
+const policyOf = (block) => Number(/^<!-- BEGIN RM CONTEXT[^\n]*?\bpolicy (\d+)/.exec(block)?.[1] || 1); // the first section had no version: policy 1
+const claudeFile = (c) => path.join(c.root, 'CLAUDE.md');
+const projectConfig = (c) => (fs.existsSync(c.config) ? readJson(c.config, {}) : {});
+
+// The CLAUDE.md state, without changing anything: missing | unmanaged | outdated | modified | duplicate | current | disabled.
+export function claudeMdState(c) {
+  const cfg = projectConfig(c);
+  const file = claudeFile(c);
+  const base = { file, policy: null, generator: CLAUDE_POLICY, blocks: 0, userLines: 0, strategy: cfg.claudeMdStrategy || null };
+  if (cfg.claudeMd === false) return { ...base, state: 'disabled', exists: fs.existsSync(file), needsChoice: false };
+  if (!fs.existsSync(file)) return { ...base, state: 'missing', exists: false, needsChoice: false };
+  const old = fs.readFileSync(file, 'utf8');
+  const eol = old.includes('\r\n') ? '\r\n' : '\n';
+  const blocks = old.match(BLOCK_RX) || [];
+  const userLines = old.replace(BLOCK_RX, '').split(/\r?\n/).filter((l) => l.trim()).length;
+  const policy = blocks.length ? Math.max(...blocks.map(policyOf)) : null;
+  const state = !blocks.length ? 'unmanaged' : blocks.length > 1 ? 'duplicate' : policy < CLAUDE_POLICY ? 'outdated' : blocks[0] !== generatedBlock(eol) ? 'modified' : 'current';
+  return { ...base, state, exists: true, policy, blocks: blocks.length, userLines, needsChoice: state === 'unmanaged' && userLines > 0 && !cfg.claudeMdStrategy };
+}
+const generatedBlock = (eol) => [CLAUDE_BEGIN, CLAUDE_SECTION, CLAUDE_END].join('\n').replace(/\n/g, eol);
+
+// mode 'write' | 'check'; strategy 'combine' (default) | 'replace' (needs confirm). Returns { file, action, state, backup? }.
+// Actions: created | updated | replaced | unchanged | disabled, or would-create | would-update | would-replace in check mode.
+export function writeClaudeMd(c, { mode = 'write', strategy, confirm = false } = {}) {
+  const st = claudeMdState(c);
+  const file = st.file;
+  if (st.state === 'disabled') return { file, action: 'disabled', state: st };
+  const choice = strategy || 'combine';
+  if (!['combine', 'replace'].includes(choice)) fail(`Unknown CLAUDE.md strategy "${choice}": combine or replace.`);
+  const old = st.exists ? fs.readFileSync(file, 'utf8') : null;
+  const eol = old && old.includes('\r\n') ? '\r\n' : '\n';
+  const block = generatedBlock(eol);
+  let next, backup = null;
+  const destructive = choice === 'replace' && st.userLines > 0;
+  if (old == null) next = block + eol;
+  else if (destructive) {
+    if (mode === 'check') return { file, action: 'would-replace', state: st };
+    if (!confirm) fail(`Replace Entire File would replace ${st.userLines} line(s) of existing instructions in CLAUDE.md with the generated RM Context section. Nothing was changed. After the user confirms, run it again with --confirm; the old file is backed up to .rmcontext/backups/ first.`);
+    next = block + eol;
+  } else if (!st.blocks) next = old + (old.length && !old.endsWith(eol) ? eol : '') + (old.trim().length ? eol : '') + block + eol;
+  else {
+    // Every managed block is removed; the first one's position is kept.
+    const rest = old.replace(BLOCK_RX, '\u0000');
+    const first = rest.indexOf('\u0000');
+    next = (rest.slice(0, first) + block + rest.slice(first + 1).replace(/\u0000(\r?\n)?/g, '')).replace(/\u0000/g, '');
+  }
+  const remember = () => { if (strategy && mode === 'write' && fs.existsSync(c.config)) { const cfg = readJson(c.config, {}); if (cfg.claudeMdStrategy !== strategy) writeJson(c.config, { ...cfg, claudeMdStrategy: strategy }); } };
+  if (next === old) { remember(); return { file, action: 'unchanged', state: st }; }
+  if (mode === 'check') return { file, action: old == null ? 'would-create' : 'would-update', state: st };
+  if (destructive) {
+    fs.mkdirSync(c.p('backups'), { recursive: true });
+    backup = c.p('backups', `CLAUDE.md.${now().replace(/[:.]/g, '-')}.bak`);
+    fs.writeFileSync(backup, old);
+  }
+  fs.writeFileSync(file, next);
+  remember();
+  return { file, action: old == null ? 'created' : destructive ? 'replaced' : 'updated', state: st, backup: backup && path.relative(c.root, backup).split(path.sep).join('/') };
+}
+
+export function formatClaudeMdState(st) {
+  const what = {
+    missing: 'no CLAUDE.md yet; rmc claude-md creates it',
+    unmanaged: `exists without an RM Context section (${st.userLines} line(s) of your instructions)${st.needsChoice ? '; choose combine (recommended) or replace' : `; strategy ${st.strategy || 'combine'}`}`,
+    outdated: `managed section uses policy ${st.policy}; the active generator writes policy ${st.generator}. rmc claude-md updates only the managed section`,
+    modified: `managed section (policy ${st.policy}) was edited by hand; rmc claude-md restores the generated text`,
+    duplicate: `${st.blocks} managed sections; rmc claude-md merges them into one`,
+    current: `managed section is current (policy ${st.policy})`,
+    disabled: 'disabled (claudeMd: false in .rmcontext/config.json)',
+  }[st.state];
+  return `CLAUDE.md: ${st.state} — ${what}.`;
+}
+
+// What a policy update on an already-initialized project found: nothing here changes knowledge or overrides.
+export function policyReport(c, { generator, extractorVersion } = {}) {
+  const man = readJson(c.manifest, {});
+  const cfg = projectConfig(c);
+  const lines = [];
+  lines.push(`Schema: ${man.schemaVersion === SCHEMA_VERSION ? `v${SCHEMA_VERSION} (current)` : `v${man.schemaVersion ?? '?'} → v${SCHEMA_VERSION}: the graph is migrated in place on the next refresh`}`);
+  const fileState = readJson(c.files, {});
+  if (extractorVersion != null && fileState.extractorVersion !== extractorVersion) lines.push(`Extractor: v${fileState.extractorVersion ?? '?'} → v${extractorVersion}: the next refresh re-reads every file (run rmc refresh when convenient; not run now)`);
+  const models = readJson(path.join(PLUGIN_ROOT, 'config', 'models.json'));
+  for (const [a, m] of Object.entries(cfg.models || {})) lines.push(`Model override kept: models.${a} = ${m} (project setting; without it the ${a} role policy applies: ${['low', 'medium', 'high'].map((t) => models.roles?.[a]?.[t]).filter(Boolean).join('/') || models.agents?.[a]?.model})`);
+  if (cfg.tiers && Object.keys(cfg.tiers).length) lines.push(`Tier override kept: tiers = ${JSON.stringify(cfg.tiers)} (wins over every role policy)`);
+  if (cfg.roles && Object.keys(cfg.roles).length) lines.push(`Role policy override kept: roles.${Object.keys(cfg.roles).join(', roles.')}`);
+  let stale = [];
+  try { stale = changedSinceScan(c).filter((f) => f !== 'CLAUDE.md'); } catch { /* no scan state */ }
+  lines.push(stale.length ? `Knowledge: ${stale.length} file(s) changed since the last scan (marked [stale] in packages); not re-read now. Run rmc refresh (incremental) when you want them indexed.` : 'Knowledge: fresh; nothing to re-read.');
+  lines.push(`Agents, skills, commands and the model policy are read from the active plugin (${generator || 'rm-context'}); nothing is copied into the project.`);
+  return lines;
 }

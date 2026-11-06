@@ -1,5 +1,7 @@
-// Adaptive model routing: picks the delegated agent's model from task category + complexity signals.
-// Agent selection and model selection are separate decisions; the main session model is never touched.
+// Adaptive model routing: picks the delegated agent's model from its role, the task category and complexity signals.
+// Complexity tier (low/medium/high), model family (haiku/sonnet/opus) and agent role are separate: each role's policy in
+// config/models.json "roles" maps a tier to a model, so high complexity is not Opus by itself. The main session model is
+// never touched and never used as a subagent model unless the user names it.
 import fs from 'node:fs';
 import path from 'node:path';
 import { PLUGIN_ROOT, readJson, fail, now, readHandoffs } from './util.mjs';
@@ -9,7 +11,7 @@ export const TIERS = ['low', 'medium', 'high'];
 // Raise to high: any of these. Raise to at least medium: ambiguous, code, 2 modules. Lower to low: trivial/retrieval with no raise signal.
 const HIGH = { security: 'security-sensitive', architecture: 'architectural decisions', irreversible: 'hard to reverse',
   debugging: 'deep debugging', 'cross-module': 'cross-module reasoning' };
-const MEDIUM = { ambiguous: 'ambiguous requirement', code: 'modifies source code' };
+const MEDIUM = { ambiguous: 'ambiguous requirement', code: 'modifies source code', sensitive: 'auth, payment or sensitive data' };
 const LOW = { trivial: 'small, low-risk change', retrieval: 'simple retrieval or transformation' };
 export const SIGNALS = [...Object.keys(HIGH), ...Object.keys(MEDIUM), ...Object.keys(LOW), 'context', 'modules:N'];
 
@@ -18,9 +20,37 @@ const metricsFile = (c) => c.p('state', 'routing.jsonl');
 export function loadModelConfig(c) {
   const base = readJson(path.join(PLUGIN_ROOT, 'config', 'models.json'));
   const proj = c && fs.existsSync(c.config) ? readJson(c.config) : {};
+  const roles = { ...(base.roles || {}) };
+  for (const [a, r] of Object.entries(proj.roles || {})) roles[a] = { ...(roles[a] || {}), ...r };
   return { ...base, routing: { ...base.routing, ...(proj.routing || {}) }, tiers: { ...base.tiers, ...(proj.tiers || {}) },
-    project: proj.models || {} };
+    projectTiers: proj.tiers || {}, roles, project: proj.models || {} };
 }
+
+// The role policy's model for a complexity tier. A project-wide tier mapping (config.json "tiers") is a project override
+// and wins. A role's "deep" model (Opus) applies only at the high tier, when one of its conditions holds ("a+b" = all of
+// a, b; the category counts as a condition), and, if the policy lists categories, only for those categories.
+export function roleModel(cfg, agent, tier, sig = { flags: new Set(), modules: 0 }, category = null) {
+  if (cfg.projectTiers?.[tier]) return { value: cfg.projectTiers[tier], basis: `project tier mapping: ${tier} → ${cfg.projectTiers[tier]}`, deep: false };
+  const pol = cfg.roles?.[agent];
+  if (!pol?.[tier]) return { value: cfg.tiers[tier], basis: `tier mapping: ${tier} → ${cfg.tiers[tier]}`, deep: false };
+  const d = pol.deep;
+  if (tier === 'high' && d?.model && (!d.categories || d.categories.includes(category))) {
+    const have = new Set([...sig.flags, ...(sig.modules >= 3 ? ['cross-module'] : []), ...(category ? [category] : [])]);
+    const hit = (d.when || []).find((w) => w.split('+').every((t) => have.has(t)));
+    if (hit) return { value: d.model, basis: `${agent} role policy: high + ${hit} → ${d.model}`, deep: true };
+  }
+  return { value: pol[tier], basis: `${agent} role policy: ${tier} → ${pol[tier]}`, deep: false };
+}
+const RANK = { haiku: 1, sonnet: 2, opus: 3 };
+// The next stronger model this role allows (its tier models, then its deep model); null when it already runs the strongest.
+function strongerModel(cfg, agent, current) {
+  const pol = cfg.roles?.[agent];
+  const ladder = pol ? [...TIERS.map((t) => cfg.projectTiers?.[t] || pol[t]), pol.deep?.model] : TIERS.map((t) => cfg.tiers[t]);
+  return ladder.filter(Boolean).map((v) => toAgentModel(v, cfg)?.model).find((m) => (RANK[m] || 0) > (RANK[current] || 0)) || null;
+}
+// A failure caused by missing information is fixed with context, not a bigger model.
+const CONTEXT_GAP = /\b(?:missing|lack(?:s|ed|ing)?|no|not enough|insufficient|without)\b.{0,30}\b(?:context|information|info|knowledge|details?|access|hand-?off)\b|\bcontext gap\b|\bkurang (?:konteks|informasi|context|info)\b|\btidak ada (?:konteks|informasi)\b|\bbelum ada (?:konteks|informasi)\b/i;
+export const isContextGap = (reason) => CONTEXT_GAP.test(String(reason || ''));
 
 // Turn a configured value into something the Agent tool accepts. Full claude-* ids map to their family alias
 // because Claude Code's Agent tool takes aliases; anything unsupported returns null.
@@ -77,8 +107,9 @@ export function route(c, opts = {}) {
     if (!cfg.routing.allowEscalation) fail('Escalation is disabled (routing.allowEscalation = false). Report the blocker to the user instead.');
     if (prev.source !== 'adaptive') fail(`Route ${prev.id} used a fixed model (${prev.source}); it is not escalated automatically. Ask the user before changing it.`);
     if (prev.escalations >= cfg.routing.maxEscalations) fail(`Route ${prev.id} already reached maxEscalations (${cfg.routing.maxEscalations}). Report what is blocking to the user.`);
-    if (prev.tier === 'high') fail(`Route ${prev.id} is already at the high tier. Report what is blocking to the user.`);
     if (!opts.reason) fail('Escalation needs --reason "<new evidence that the task is harder than classified>".');
+    if (isContextGap(opts.reason)) fail(`"${opts.reason}" is missing context, not a reasoning limit. Retry on ${prev.model} with the missing context (rmc find …, the previous hand-off) instead of escalating.`);
+    if (!strongerModel(cfg, prev.agent, prev.model)) fail(`Route ${prev.id} already runs ${prev.model}, the strongest model the ${roleName(prev.agent)} role allows. Report what is blocking to the user.`);
     if ((prev.reasons || []).includes(opts.reason)) fail('This reason was already used to escalate. Escalate only on new evidence.');
     opts.handoff = opts.handoff || prev.handoff || fail(`Escalation needs the previous agent's findings: record them with "rmc handoff add", then pass --handoff <id>.`);
     opts.agent = opts.agent || prev.agent;
@@ -91,16 +122,22 @@ export function route(c, opts = {}) {
   const agentDef = cfg.agents[agent] || fail(`Unknown agent ${agent}. Agents: ${Object.keys(cfg.agents).join(', ')}`);
   const sig = parseSignals(opts.signals);
 
-  let tier = null, why = [], source, value;
+  // Precedence: explicit user model → project override → agent override → role policy (complexity tier + signals) →
+  // agent default. The main session model is not in this list: it is only used for the notice and the 'inherit' fallback.
+  let tier = null, why = [], source, value, basis;
   const cls = task ? classify(task.tier || cfg.routing.defaultTier, sig) : null;
-  if (opts.model) { source = 'user'; value = opts.model; }
-  else if (cfg.project[agent]) { source = 'project'; value = cfg.project[agent]; }
-  else if (agentDef.override) { source = 'agent override'; value = agentDef.override; }
+  if (opts.model) { source = 'user'; value = opts.model; basis = 'explicit user model'; }
+  else if (cfg.project[agent]) { source = 'project'; value = cfg.project[agent]; basis = `project override (config.json models.${agent})`; }
+  else if (agentDef.override) { source = 'agent override'; value = agentDef.override; basis = 'agent override (config/models.json)'; }
   else if (cfg.routing.enabled && task) {
     ({ tier, why } = cls);
-    if (prev) { tier = TIERS[TIERS.indexOf(prev.tier) + 1]; why = [`escalated from ${prev.tier}: ${opts.reason}`]; }
-    source = 'adaptive'; value = cfg.tiers[tier];
-  } else { source = 'agent default'; value = agentDef.model; }
+    if (prev) {
+      tier = TIERS[Math.min(TIERS.indexOf(prev.tier) + 1, TIERS.length - 1)] || 'high';
+      value = strongerModel(cfg, agent, prev.model);
+      why = [`escalated from ${prev.model}: ${opts.reason}`]; basis = `escalation: ${prev.model} → ${value}`;
+    } else ({ value, basis } = roleModel(cfg, agent, tier, sig, opts.category));
+    source = 'adaptive';
+  } else { source = 'agent default'; value = agentDef.model; basis = `${agent} default model`; }
 
   let resolved = toAgentModel(value, cfg);
   if (!resolved) {
@@ -110,13 +147,13 @@ export function route(c, opts = {}) {
     source += ' → fallback';
   }
   if (resolved.note) notes.push(resolved.note);
-  if (!tier) tier = Object.entries(cfg.tiers).find(([, v]) => toAgentModel(v, cfg)?.model === resolved.model)?.[0] || null;
+  if (!tier) tier = cls?.tier ?? null; // complexity tier only; never derived from the model
 
   const handoff = opts.handoff ? readHandoffs(c).find((h) => h.id === opts.handoff) || fail(`Unknown hand-off ${opts.handoff}. See: rmc handoff list`) : null;
   const r = {
     id: `R-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`, at: now(),
     workflow: opts.workflow || null, category: opts.category || null, agent, tier, complexity: source.startsWith('adaptive') ? tier : cls?.tier ?? null,
-    model: resolved.model, source, reason: source.startsWith('user') ? 'Model chosen explicitly by the user' : source.startsWith('project') || source.startsWith('agent override') ? `Fixed by ${source} configuration` : task ? [task.label, ...why].join('; ') : agentDef.reason,
+    model: resolved.model, source, basis, reason: source.startsWith('user') ? 'Model chosen explicitly by the user' : source.startsWith('project') || source.startsWith('agent override') ? `Fixed by ${source} configuration` : task ? [task.label, ...why, basis].join('; ') : agentDef.reason,
     signals: [...sig.flags, ...(sig.modules ? [`modules:${sig.modules}`] : [])],
     escalations: prev ? prev.escalations + 1 : 0, escalatedFrom: prev?.id || null,
     reasons: [...(prev?.reasons || []), ...(opts.reason ? [opts.reason] : [])],
@@ -181,6 +218,7 @@ const SIGNAL_RX = {
   architecture: RX.architecture, security: RX.security, debugging: RX.debugging,
   irreversible: /\b(?:drop|truncate) (?:table|column|database)|data loss|production data|data produksi|irreversible/i,
   code: /\bimplement|\brefactor|\bmodify\b|\bfix\b|\bperbaiki|ubah kode|tulis kode/i,
+  sensitive: /\bauth(?:entication|orization|n|z)?\b|\blogin\b|\bpasswords?\b|\bpayments?\b|pembayaran|\bpii\b|personal data|data pribadi|sensitive data|data sensitif|\bcredentials?\b|kredensial|threat model|\boauth|\bjwt\b|\brbac\b|hak akses|otorisasi|autentikasi/i,
 };
 const GREETING = /^(?:hi|hello|hey|halo|hai|thanks|thank you|terima kasih|makasih|ok(?:ay)?|sip|good (?:morning|afternoon|evening|night)|selamat (?:pagi|siang|sore|malam))\b/i;
 const GENERAL = /^(?:what (?:is|are)|apa (?:itu|arti|bedanya)|define|definisi|explain what|jelaskan apa itu)\b/i;
@@ -248,7 +286,7 @@ export function formatRoute(r) {
   if (r.tier === 'low' && !r.escalatedFrom && !r.notes.length) {
     lines.push(`RM Context Routing: ${name} · ${model} · low (${r.id})`);
   } else {
-    lines.push('RM Context Routing', `- Agent: ${name}`, `- Model: ${model}`, `- Complexity: ${r.complexity ? r.complexity[0].toUpperCase() + r.complexity.slice(1) : 'n/a'} (${r.source})`, `- Reason: ${r.reason}.`);
+    lines.push('RM Context Routing', `- Agent: ${name}`, `- Model: ${model}${r.basis ? ` (${r.basis})` : ''}`, `- Complexity: ${r.complexity ? r.complexity[0].toUpperCase() + r.complexity.slice(1) : 'n/a'} (${r.source})`, `- Reason: ${r.reason}.`);
     if (r.contextReuse) lines.push(`- Context: ${r.handoff ? `hand-off ${r.handoff} reused` : 'existing verified context reused'}.`);
     if (r.escalatedFrom) lines.push(`- Escalation: #${r.escalations}, from ${r.escalatedFrom}.`);
     lines.push(`- Route: ${r.id}`);
@@ -325,8 +363,10 @@ export function formatStats(s) {
 
 export function formatCategories(c) {
   const cfg = loadModelConfig(c);
-  return ['| Category | Tier | Model | Default agent | Use for |', '|---|---|---|---|---|',
-    ...Object.entries(cfg.tasks).map(([k, t]) => `| ${k} | ${t.tier || cfg.routing.defaultTier} | ${cfg.tiers[t.tier || cfg.routing.defaultTier]} | ${t.agent || "(give --agent)"} | ${t.label} |`), '',
+  const m = (k, t) => { const tier = t.tier || cfg.routing.defaultTier; return t.agent ? roleModel(cfg, t.agent, tier, undefined, k).value : cfg.tiers[tier]; };
+  return ['| Category | Tier | Model (role policy, no signals) | Default agent | Use for |', '|---|---|---|---|---|',
+    ...Object.entries(cfg.tasks).map(([k, t]) => `| ${k} | ${t.tier || cfg.routing.defaultTier} | ${m(k, t)} | ${t.agent || "(give --agent)"} | ${t.label} |`), '',
     `Signals: ${SIGNALS.join(', ')}`,
-    'high: security, architecture, irreversible, debugging, cross-module, modules:3+ · at least medium: ambiguous, code, modules:2 · low: trivial or retrieval (unless ambiguous or a high signal)'].join('\n');
+    'high: security, architecture, irreversible, debugging, cross-module, modules:3+ · at least medium: ambiguous, code, sensitive, modules:2 · low: trivial or retrieval (unless ambiguous or a high signal)',
+    'The tier is complexity, not a model: each role maps it to a model (rmc routing). Opus is a role\'s "deep" model, used at high only under that role\'s conditions.'].join('\n');
 }
