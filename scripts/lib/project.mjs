@@ -18,12 +18,24 @@ export function ensureIgnored(c) {
   return false;
 }
 
+// The repository's own .gitignore: .rmcontext/ is generated, so it is not pushed unless the user removes the line.
+// Idempotent; any existing rule for the folder is respected and the user's lines stay untouched.
+export function ensureRootIgnored(c) {
+  const f = path.join(c.root, '.gitignore');
+  const cur = fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : '';
+  if (/^\s*\/?\.rmcontext(\/\*{0,2})?\s*$/m.test(cur)) return false;
+  const eol = cur.includes('\r\n') ? '\r\n' : '\n';
+  writeFile(f, (cur && !/\r?\n$/.test(cur) ? cur + eol : cur) + `# RM Context knowledge base (generated; remove this line to commit it)${eol}.rmcontext/${eol}`);
+  return true;
+}
+
 export function initProject(c) {
   const created = [];
   for (const d of DIRS) if (!fs.existsSync(c.p(d))) { fs.mkdirSync(c.p(d), { recursive: true }); created.push(d + '/'); }
   const ensure = (file, content) => { if (!fs.existsSync(file)) { writeFile(file, content); created.push(path.relative(c.base, file)); } };
   ensure(c.p('.gitignore'), '# Machine-local state (absolute paths, file mtimes)\n.local/\nstate/files.json\nbackups/\n');
   ensureIgnored(c);
+  if (ensureRootIgnored(c)) created.push('.gitignore (.rmcontext/)');
   ensure(c.config, JSON.stringify({ schemaVersion: SCHEMA_VERSION, models: {}, ignore: [], maxFileBytes: 1000000 }, null, 2) + '\n');
   ensure(c.registry, JSON.stringify({ schemaVersion: SCHEMA_VERSION, documents: [] }, null, 2) + '\n');
   ensure(c.nodes, '[]\n');
@@ -293,19 +305,20 @@ export function validateAll(c) {
 // The chosen strategy is remembered (config.json claudeMdStrategy) so the question is not asked again; a remembered
 // "replace" never replaces again — later runs update the managed section only. Re-running is a no-op.
 // CLAUDE_POLICY versions the section's policy text; it is independent of the plugin release version.
-export const CLAUDE_POLICY = 3;
+export const CLAUDE_POLICY = 5;
 export const CLAUDE_BEGIN = `<!-- BEGIN RM CONTEXT · policy ${CLAUDE_POLICY} · managed by rmc (rmc claude-md); edits between these markers are replaced -->`;
 export const CLAUDE_END = '<!-- END RM CONTEXT -->';
 export const CLAUDE_SECTION = `## RM Context
 
 Project knowledge is in \`.rmcontext/\` (start at \`.rmcontext/INDEX.md\`; \`rmc find <terms>\`, \`rmc impact <file|id>\`; the \`rmc\` command line is in the session context).
 
+- **Hooks are binding.** RM Context hook context (relevant knowledge, model question, delegation suggestion, pending-change notice) is an instruction, not background: use the knowledge before searching, ask the model question, delegate or say in one line why not, and run \`rmc refresh\` when changes are pending.
 - **Knowledge first.** Read the relevant \`.rmcontext/\` knowledge before exploring source; open only the files it does not cover. No full scan while it is fresh (except initial discovery, large invalidation or an explicit audit).
 - **Check it.** Weigh provenance, confidence (\`[inferred]\` is a heuristic), lifecycle and freshness. Source, schema, config and actual behaviour win; stale or contradicted knowledge → targeted check, then \`rmc refresh\`. Never invent knowledge.
 - **Reuse first.** Find the existing component, function, service, DTO, type or utility before writing new code; extend it when it nearly fits (check consumers); say why if you cannot reuse it.
 - **Smallest correct change.** No speculative abstractions, duplicate validation/state/API calls, or new files and dependencies without need. Never trade away readability, types, error handling, authorization or business rules.
 - **Direct first.** Simple questions and small edits: do them directly; subtasks are an internal checklist, so backend then frontend run sequentially in this session. Multi-stage work (analysis → implementation → verification) or cross-module changes: use or suggest \`/rmc:run <task>\`. Agents only for specialist reasoning, independent QA or real context isolation, never merely to get another model.
-- **Model.** Coding, debugging, refactoring and migrations belong on Sonnet; architecture, security and critical business logic on Opus. Prefer switching the main session (the user's \`/model\`, or \`opusplan\`) over delegating; RM Context only recommends, switch once per phase, and never claim a switch you did not observe.
+- **Model.** Coding, debugging, refactoring, tests, docs → Sonnet; architecture, complex analysis, critical security → Opus. On Opus with Sonnet work, ask once per task (Yes, switch to Sonnet / No, continue with Opus) before starting: Yes → give \`/model sonnet\` (or \`opusplan\`), wait; No → continue, do not ask again. Never spawn an agent merely to get another model or claim a switch you did not observe; if the active model is unknown, do not ask.
 - **Workflows.** Pass hand-offs between stages instead of repeating analysis. A stage is done only when its verification gate passes with evidence, never because a tool call succeeded.
 - **Database & mobile.** Read \`.rmcontext/database/\` and \`.rmcontext/mobile/\` (\`rmc database find|show\`, \`rmc mobile find\`) and check schema, procedures, API mapping and architecture before implementing. Reuse the repository, DAO, DTO, model, ViewModel, UseCase or composable; do not recreate logic a procedure or service holds; keep the detected state management (no swapping without approval). Stale → targeted \`rmc database refresh\` / \`rmc mobile detect\`, not a full scan.
 - **Database safety.** Discovery is read-only everywhere; never print or store credentials; no direct SQL, procedure runs or db clients during a protected change. DEV: migrations in the project's framework, no backup objects. STAGING: prepare migration, rollback and checklist for the user to apply (\`rmc database plan-change\`); a Claude apply needs a verified backup and approvals. PRODUCTION: strict, plan only unless the user explicitly asks. UNKNOWN: change nothing.`;

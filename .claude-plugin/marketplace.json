@@ -11,7 +11,7 @@
       "name": "rmc",
       "source": "./",
       "description": "Your Project Intelligence Layer for AI Coding Agents. Professional agents with adaptive model routing on an evidence-backed project knowledge graph.",
-      "version": "0.5.1",
+      "version": "0.5.2",
       "homepage": "https://rmtemplate.com"
     }
   ]

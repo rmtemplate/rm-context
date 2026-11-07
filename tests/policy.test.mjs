@@ -99,7 +99,7 @@ test('rmc init creates CLAUDE.md with the knowledge-first, reuse-first section w
   assert.match(md, /never because a tool call succeeded/);
   // Compact: the whole section stays a small, fixed cost per session (≈ 3.5 characters per token).
   const section = md.slice(md.indexOf(BEGIN), md.indexOf(END) + END.length);
-  assert.ok(section.length / 3.5 < 900, `section is ${Math.ceil(section.length / 3.5)} estimated tokens`);
+  assert.ok(section.length / 3.5 < 1050, `section is ${Math.ceil(section.length / 3.5)} estimated tokens`);
   assert.doesNotMatch(section, /[a-z]:\\|\/home\/|\/Users\/|plugins\/cache/i, 'no machine-specific path or plugin version in CLAUDE.md');
 });
 
@@ -114,10 +114,10 @@ test('an existing CLAUDE.md keeps every user instruction; repeated init and rmc 
   ok(p.dir, 'init');
   assert.equal(claudeMd(p), first);
   assert.match(run(p, ['claude-md']), /section unchanged/);
-  assert.match(run(p, ['claude-md', '--check']), /CLAUDE\.md: current — managed section is current \(policy 3\)/);
+  assert.match(run(p, ['claude-md', '--check']), /CLAUDE\.md: current — managed section is current \(policy 5\)/);
   // Edits inside the markers are replaced; text the user adds after the section is kept.
   fs.writeFileSync(path.join(p.dir, 'CLAUDE.md'), first.replace('**Reuse first.**', '**Reuse maybe.**') + '\r\n## Local notes\r\nUse port 3001.\r\n');
-  assert.match(run(p, ['claude-md', '--check']), /CLAUDE\.md: modified — managed section \(policy 3\) was edited by hand/);
+  assert.match(run(p, ['claude-md', '--check']), /CLAUDE\.md: modified — managed section \(policy 5\) was edited by hand/);
   assert.match(run(p, ['claude-md']), /section updated/);
   const after = claudeMd(p);
   assert.ok(after.startsWith(user));
@@ -356,4 +356,15 @@ test('agent instructions carry the knowledge-first, reuse-first and minimal-code
   assert.match(sk, /BaseDataTable/);
   assert.match(read('skills/team-workflows/SKILL.md'), /\.rmcontext\/` knowledge → targeted source inspection → broader exploration only when necessary/);
   for (const a of ['senior-engineer', 'system-analyst', 'business-analyst']) assert.match(read(`agents/${a}.md`), /^model: sonnet$/m, a);
+});
+
+test('init adds .rmcontext/ to the repository .gitignore: created, appended, idempotent, existing rules and EOLs respected', () => {
+  const read = (d) => fs.readFileSync(path.join(d, '.gitignore'), 'utf8');
+  const a = fixture('node-app'); fs.rmSync(path.join(a, '.gitignore'), { force: true }); ok(a, 'init');
+  assert.match(read(a), /^# RM Context[^\n]*\n\.rmcontext\/\n$/m);
+  ok(a, 'init'); assert.equal(read(a).match(/^\.rmcontext\/$/gm).length, 1, 'idempotent');
+  const b = fixture('node-app'); fs.writeFileSync(path.join(b, '.gitignore'), 'node_modules\r\ndist'); ok(b, 'init');
+  assert.match(read(b), /^node_modules\r\ndist\r\n# RM Context[^\r]*\r\n\.rmcontext\/\r\n$/, 'user lines and CRLF kept');
+  const c = fixture('node-app'); fs.writeFileSync(path.join(c, '.gitignore'), '/.rmcontext\n'); ok(c, 'init');
+  assert.equal(read(c), '/.rmcontext\n', 'an existing rule is respected');
 });

@@ -1,9 +1,18 @@
 # Changelog
 
+## 0.5.2
+
+### Changed
+- **CLAUDE.md (policy 5):** new "Hooks are binding" rule: RM Context hook context (knowledge, model question, delegation suggestion, pending-change notice) is treated as an instruction, not background. Existing projects update through `rmc claude-md`.
+- **`rmc init` and `.gitignore`:** init now adds `.rmcontext/` to the repository's own `.gitignore` (creating it if missing, appending without touching your lines or line endings, skipping if a rule exists), so the generated knowledge is not pushed. Remove the line to commit it. Files already tracked by git stay tracked (`git rm -r --cached .rmcontext`).
+- **Main-session model confirmation:** on an Opus session with Sonnet-class work the prompt hook now has Claude ask once per task (Yes, switch to Sonnet / No, continue with Opus) before starting. Yes → `/model sonnet` is shown and Claude waits for the user; No → continues, not re-asked. Never switches automatically, never spawns an agent for a model, silent when the active model is unknown. CLAUDE.md managed section policy 4 (existing projects update via `rmc claude-md`).
+
+
 ## 0.5.1
 
 ### Added
 - **Viewer:** *Database Intelligence* and *Mobile* pages (tables, columns, keys, indexes, procedures, parameters, dependencies, application usage, limitations, protected changes; mobile architecture, state, data layer, chains). Metadata only.
+- **Viewer (Database Intelligence):** objects are split into tabs (Tables, Stored procedures, Views, Functions, Triggers, with counts), every item is clickable and opens a detail panel with its query (the stored definition; for tables the source DDL or a DDL generated from recorded metadata), columns/parameters, what it touches, what uses it and its application call sites. Definitions that are encrypted or were flagged for a secret are never shown; the panel says why. Definitions are capped at 20 000 characters in the viewer.
 
 ## 0.5.0
 

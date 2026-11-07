@@ -56,6 +56,13 @@ function compiledCss() {
   throw new Error('scripts/viewer/viewer.css is missing and Tailwind could not be run (needs npx).');
 }
 
+// A stored definition (never one flagged for a secret: those were not stored). Capped so the viewer stays small.
+const DEF_MAX = 20000;
+function defOf(base, o) {
+  if (!o.definitionFile) return undefined;
+  try { const t = fs.readFileSync(path.join(base, o.definitionFile), 'utf8'); return t.length > DEF_MAX ? t.slice(0, DEF_MAX) + '\n-- … truncated in the viewer; full text: rmc database show ' + o.kind + ' ' + o.name + ' --definition' : t; } catch { return undefined; }
+}
+
 // Database + mobile knowledge for the viewer: structure and metadata only (no definitions, no credentials).
 function dbIntel(c) {
   const out = { targets: [], mobile: null, changes: [] };
@@ -69,7 +76,7 @@ function dbIntel(c) {
         for (const f of fs.readdirSync(d).filter((x) => x.endsWith('.json'))) { const o = readJson(path.join(d, f), null); if (!o) continue;
           objs.push({ kind: o.kind, schema: o.schema, name: o.name, status: o.status, confidence: o.confidence, source: o.provenance?.source, file: o.provenance?.file, at: o.provenance?.updatedAt,
             columns: o.columns?.map((x) => ({ name: x.name, type: x.type, pk: x.pk || undefined, nullable: x.nullable, identity: x.identity || undefined })), primaryKey: o.primaryKey, foreignKeys: o.foreignKeys?.map((x) => ({ columns: x.columns, ref: x.ref?.name, refColumns: x.refColumns })),
-            indexes: o.indexes?.map((x) => ({ name: x.name, columns: x.columns, unique: x.unique })), params: o.params, encrypted: o.encrypted, review: o.reviewRequired, dynamic: o.dynamicSql, refs: o.references?.map((r) => ({ name: r.name, kind: r.kind, mode: r.mode, status: r.status, confidence: r.confidence })) }); }
+            indexes: o.indexes?.map((x) => ({ name: x.name, columns: x.columns, unique: x.unique })), uniques: o.uniques?.map((x) => ({ name: x.name, columns: x.columns })), checks: o.checks?.map((x) => ({ name: x.name, definition: x.definition })), ddl: o.ddl, definition: defOf(base, o), params: o.params, encrypted: o.encrypted, review: o.reviewRequired, dynamic: o.dynamicSql, refs: o.references?.map((r) => ({ name: r.name, kind: r.kind, mode: r.mode, status: r.status, confidence: r.confidence })) }); }
       }
       const map = readJson(path.join(base, 'application-mapping', 'index.json'), { items: [], chain: [] });
       out.targets.push({ key, scope: t.scope, engine: t.engine, database: t.database, host: t.host, profile: t.profile, environment: t.environment, source: t.source, lastDiscoveredAt: t.lastDiscoveredAt, counts: t.counts, limitations: t.limitations, objects: objs, relationships: readJson(path.join(base, 'relationships.json'), { items: [] }).items, mapping: map.items.slice(0, 400), chain: map.chain.slice(0, 200), stats: idx.counts });

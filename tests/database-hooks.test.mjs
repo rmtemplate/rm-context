@@ -74,10 +74,10 @@ test('hooks.json registers pre-bash for Bash', () => {
   assert.ok(j.hooks.PreToolUse.some((h) => h.matcher === 'Bash' && /pre-bash/.test(h.hooks[0].command)));
 });
 
-test('CLAUDE.md managed section: policy 3 covers database/mobile knowledge, reuse, targeted refresh and the environment policy; stays compact', () => {
-  assert.equal(CLAUDE_POLICY, 3);
+test('CLAUDE.md managed section: policy 5 covers database/mobile knowledge, reuse, targeted refresh and the environment policy; stays compact', () => {
+  assert.equal(CLAUDE_POLICY, 5);
   for (const re of [/\.rmcontext\/database\/.*\.rmcontext\/mobile\//, /schema, procedures, API mapping and architecture/, /Reuse the repository, DAO, DTO, model, ViewModel, UseCase or composable/, /do not recreate logic/, /targeted .*refresh|rmc mobile detect/, /not a full scan/, /Discovery is read-only everywhere/, /DEV: migrations in the project's framework, no backup objects/, /STAGING: prepare migration, rollback and checklist for the user to apply/, /PRODUCTION: strict/, /UNKNOWN: change nothing/]) assert.match(CLAUDE_SECTION, re);
-  assert.ok(CLAUDE_SECTION.length / 3.5 < 900);
+  assert.ok(CLAUDE_SECTION.length / 3.5 < 1000);
 });
 test('init (new project) runs static detection only; an initialized project gets a hint, not a discovery', async () => {
   const d = project({ ...F.mssqlWebConfig, 'db/schema.sql': 'CREATE TABLE dbo.Members (Id INT PRIMARY KEY);' }, { init: false });

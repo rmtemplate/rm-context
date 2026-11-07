@@ -274,7 +274,7 @@ Engines: SQL Server, MySQL/MariaDB, PostgreSQL, SQLite. Live server execution go
 
 ## Main-session model policy
 
-`rmc session-model --capability`. Claude Code lets the **user** switch the main session (`/model`) and offers `opusplan` (Opus while planning, Sonnet while executing). A plugin, hook or agent cannot switch it, so RM Context only recommends (Sonnet for coding, Opus for architecture/security), once per phase, and never creates an agent just to obtain another model. Status: PARTIALLY SUPPORTED; runtime switching behaviour is a host feature that the offline test suite cannot verify.
+`rmc session-model --capability`. Claude Code lets the **user** switch the main session (`/model`) and offers `opusplan` (Opus while planning, Sonnet while executing). A plugin, hook or agent cannot switch it, so RM Context only recommends (Sonnet for coding, Opus for architecture/security). When the active model (read from the SessionStart `model` field) is Opus and the task is Sonnet work, the prompt hook has Claude ask once per task, before starting: *Yes, switch to Sonnet* (Claude shows `/model sonnet` and waits for you to confirm; nothing is switched for you) or *No, continue with Opus* (continues, never re-asked). Architecture work on Opus, coding on Sonnet and an unknown model produce no question. RM Context never creates an agent just to obtain another model. Status: PARTIALLY SUPPORTED; runtime switching behaviour is a host feature that the offline test suite cannot verify.
 
 ## Persistent project knowledge
 

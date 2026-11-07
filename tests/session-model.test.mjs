@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { ROOT, fixture, ok, rmc, repoTelemetry } from './helpers.mjs';
-import { CAPABILITY, desiredMainModel, planMainSession, sessionHint } from '../scripts/lib/session-model.mjs';
+import { CAPABILITY, CONFIRMATION, desiredMainModel, planMainSession, sessionHint, applyAnswer } from '../scripts/lib/session-model.mjs';
 import { CLAUDE_SECTION } from '../scripts/lib/project.mjs';
 import { classifyPrompt, route } from '../scripts/lib/routing.mjs';
 import { ctx } from '../scripts/lib/util.mjs';
@@ -21,10 +21,11 @@ const hook = (cwd, event, input) => { const r = spawnSync(process.execPath, [HOO
 test('1-4. init still creates CLAUDE.md; Combine/Replace remain; the section is direct-first and names main-session switching', () => {
   const d = fixture('node-app'); ok(d, 'init');
   const md = fs.readFileSync(path.join(d, 'CLAUDE.md'), 'utf8');
-  assert.match(md, /BEGIN RM CONTEXT · policy 3/);
+  assert.match(md, /BEGIN RM CONTEXT · policy 5/);
+  assert.match(md, /\*\*Hooks are binding\.\*\*[^\n]*is an instruction, not background[^\n]*model question[^\n]*delegate or say in one line why not[^\n]*rmc refresh/);
   assert.match(md, /\*\*Direct first\.\*\* Simple questions and small edits: do them directly/);
   assert.match(md, /subtasks are an internal checklist/); assert.match(md, /never merely to get another model/);
-  assert.match(md, /\*\*Model\.\*\*[^\n]*Sonnet[^\n]*Opus[^\n]*switching the main session[^\n]*\/model[^\n]*opusplan[^\n]*never claim a switch you did not observe/);
+  assert.match(md, /\*\*Model\.\*\*[^\n]*Sonnet[^\n]*Opus[^\n]*ask once per task[^\n]*Yes, switch to Sonnet[^\n]*No, continue with Opus[^\n]*\/model sonnet[^\n]*opusplan[^\n]*do not ask again[^\n]*spawn an agent merely to get another model[^\n]*claim a switch you did not observe[^\n]*unknown, do not ask/);
   assert.match(md, /Read the relevant `\.rmcontext\/` knowledge before exploring source/); assert.match(md, /Find the existing component, function, service, DTO, type or utility/);
   // existing manual file: combine keeps the user's lines; replace is refused without confirmation
   const e = fixture('node-app'); fs.writeFileSync(path.join(e, 'CLAUDE.md'), '# Mine\nKeep me.\n'); ok(e, 'init', '--claude-md', 'combine');
@@ -95,4 +96,45 @@ test('13-14. direct execution keeps the verification gate wording; the database 
 test('CLI: session-model --capability reports PARTIALLY SUPPORTED and the real mechanisms', () => {
   const r = rmc(fixture('node-app'), 'session-model', '--capability'); assert.equal(r.code, 0, r.err);
   assert.match(r.out, /PARTIALLY SUPPORTED \(automatic switching by a plugin: UNSUPPORTED; runtime verified: no\)/); assert.match(r.out, /\/model <alias>: manual/); assert.match(r.out, /opusplan: automatic/);
+});
+
+// ---- Model confirmation before the task starts ----
+const CODING = 'refactor the invoice service in this project to remove the duplicated totals logic';
+const asked = (d, sid, prompt) => hook(d, 'prompt', { session_id: sid, prompt })?.hookSpecificOutput?.additionalContext || '';
+const cleanup = (sid) => { for (const f of fs.readdirSync(await_tmp())) if (f.startsWith(`rmc-session-${sid}`)) fs.rmSync(path.join(await_tmp(), f), { force: true }); };
+test('C1. Opus + coding task: the confirmation question with Yes/No is put to the user before work', () => {
+  const d = fixture('node-app'); ok(d, 'init'); const sid = 'cf1-' + process.pid;
+  hook(d, 'session-start', { session_id: sid, model: 'claude-opus-5-5' });
+  const t = asked(d, sid, CODING);
+  assert.ok(t.includes(CONFIRMATION.question)); assert.ok(t.includes('Yes, switch to Sonnet.') && t.includes('No, continue with Opus.'));
+  assert.match(t, /BEFORE starting the task, ask the user once/); assert.match(t, /wait for their confirmation before implementing/);
+  cleanup(sid);
+});
+test('C2/C3/C6. Opus + architecture, Sonnet + coding, unknown model: no question', () => {
+  const d = fixture('node-app'); ok(d, 'init');
+  for (const [model, prompt] of [['claude-opus-5-5', 'design the overall architecture for a new multi-tenant billing system in this project'], ['claude-sonnet-5-5', CODING], [undefined, CODING]]) {
+    const sid = 'cf2-' + model + process.pid; hook(d, 'session-start', { session_id: sid, ...(model ? { model } : {}) });
+    assert.doesNotMatch(asked(d, sid, prompt), /main-session model/, String(model)); cleanup(sid);
+  }
+  assert.equal(planMainSession({ category: 'refactor' }).action, 'unknown-active-model'); assert.equal(sessionHint(planMainSession({ category: 'refactor' })), null);
+});
+test('C4/C5. the answers: No continues on Opus without re-asking; Yes gives /model sonnet, waits, never claims a switch', () => {
+  const plan = planMainSession({ category: 'refactor', activeModel: 'claude-opus-5-5' });
+  const no = applyAnswer(plan, 'No, continue with Opus.');
+  assert.deepEqual([no.proceed, no.wait, no.model, no.claimedSwitched, no.ask], [true, false, 'opus', false, false]);
+  const yes = applyAnswer(plan, 'Yes, switch to Sonnet.');
+  assert.deepEqual([yes.proceed, yes.wait, yes.instruction, yes.claimedSwitched, yes.model], [false, true, '/model sonnet', false, 'opus']);
+  assert.match(sessionHint(plan), /never claim it switched/);
+});
+test('C7. one task with several subtasks/prompts asks once', () => {
+  const d = fixture('node-app'); ok(d, 'init'); const sid = 'cf7-' + process.pid;
+  hook(d, 'session-start', { session_id: sid, model: 'claude-opus-5-5' });
+  assert.match(asked(d, sid, CODING), /main-session model/);
+  for (const p of ['now also refactor the payment service in this project to share the rounding helper', 'then fix the bug in the invoice totals rounding in this project']) assert.doesNotMatch(asked(d, sid, p), /main-session model/);
+  cleanup(sid);
+});
+test('C8. the confirmation never creates or suggests an agent for model routing', () => {
+  const plan = planMainSession({ category: 'refactor', activeModel: 'claude-opus-5-5' });
+  assert.equal(plan.spawnAgent, false); assert.match(sessionHint(plan), /Do NOT spawn an agent just to get a different model/);
+  assert.doesNotMatch(sessionHint(plan), /(use|create|spawn|launch) (a |the )?sonnet (sub)?agent/i);
 });

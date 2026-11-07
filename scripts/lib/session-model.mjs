@@ -54,10 +54,26 @@ export function planMainSession({ category, signals = [], phase, activeModel, us
   return { ...base, action: 'recommend-user-switch', needsSwitch: true, mechanism: '/model', instruction: `/model ${desired}` };
 }
 
-// The one-line context hint (null when nothing to say). Honest wording: a recommendation, never "switched".
+// The confirmation the main session must put to the user BEFORE starting (null when nothing to ask). Honest wording: a question and a
+// recommendation, never "switched". Asked once per task: the hook records it in the session, and a No (or an ignored question) is final.
+export const cap = (m) => m[0].toUpperCase() + m.slice(1);
+export const CONFIRMATION = Object.freeze({
+  options: ['Yes, switch to Sonnet.', 'No, continue with Opus.'],
+  question: 'Main session saat ini menggunakan Opus. Task ini termasuk pekerjaan yang direkomendasikan menggunakan Sonnet agar lebih efisien. Apakah Anda ingin mengganti model ke Sonnet terlebih dahulu?',
+});
 export function sessionHint(plan) {
   if (!plan || plan.action !== 'recommend-user-switch') return null;
-  return `RM Context main-session model: this is ${plan.reason}; ${plan.desiredModel[0].toUpperCase() + plan.desiredModel.slice(1)} is recommended, the active model is ${plan.activeModel[0].toUpperCase() + plan.activeModel.slice(1)}. Switching is user-triggered (/model ${plan.desiredModel}); RM Context cannot do it for you. Continue directly on the current model if the user does not switch. Do NOT spawn an agent just to get a different model.`;
+  const to = cap(plan.desiredModel), from = cap(plan.activeModel);
+  const q = plan.activeModel === 'opus' && plan.desiredModel === 'sonnet' ? CONFIRMATION.question : `Main session saat ini menggunakan ${from}. Task ini direkomendasikan menggunakan ${to}. Apakah Anda ingin mengganti model ke ${to} terlebih dahulu?`;
+  const opts = plan.activeModel === 'opus' && plan.desiredModel === 'sonnet' ? CONFIRMATION.options : [`Yes, switch to ${to}.`, `No, continue with ${from}.`];
+  return `RM Context main-session model: this is ${plan.reason}; ${to} is recommended, the active model is ${from}. BEFORE starting the task, ask the user once (AskUserQuestion, two options "${opts[0]}" / "${opts[1]}"): "${q}" On Yes: tell the user to type /model ${plan.desiredModel} (RM Context cannot do it for you; never claim it switched), then wait for their confirmation before implementing. On No: continue on ${from} and do not ask again for this task or its subtasks. Do NOT spawn an agent just to get a different model.`;
+}
+// What happens after the user answers. Neither answer switches anything by itself.
+export function applyAnswer(plan, answer) {
+  const yes = /^(y|yes|ya)\b/i.test(String(answer || '').trim());
+  if (!plan || plan.action !== 'recommend-user-switch') return { proceed: true, wait: false, claimedSwitched: false, ask: false, model: plan?.activeModel || null };
+  if (!yes) return { proceed: true, wait: false, claimedSwitched: false, ask: false, model: plan.activeModel, note: `continuing on ${cap(plan.activeModel)}` };
+  return { proceed: false, wait: true, claimedSwitched: false, ask: false, model: plan.activeModel, instruction: `/model ${plan.desiredModel}`, note: 'RM Context cannot switch the model; type the command, then confirm so the work can continue' };
 }
 
 // Telemetry: metadata only. `actual` is what was observed (the active model), never the desired one; a switch is recorded as

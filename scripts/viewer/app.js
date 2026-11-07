@@ -585,25 +585,65 @@ function drawDbIntel(route) {
   const I = D.dbIntel || { targets: [], changes: [] };
   const all = I.targets;
   if (!all.length) return showPage(header('Database Intelligence', 'Schemas, stored procedures and dependencies from the knowledge store.') + empty('No database knowledge yet. Run <code>rmc database discover</code> (static, no connection) in this project, then rebuild the viewer.'));
-  const q = (route.params.get('q') || '').toLowerCase();
-  const cards = all.map((t) => {
-    const objs = t.objects.filter((o) => !q || (o.name + ' ' + (o.columns || []).map((c) => c.name).join(' ') + ' ' + (o.params || []).map((p) => p.name).join(' ')).toLowerCase().includes(q));
-    const row = (o) => {
-      const det = o.kind === 'table'
-        ? `<div class="text-2xs font-mono text-muted mt-1">${(o.columns || []).map((c) => `${esc(c.name)} ${esc(c.type)}${c.pk ? ' PK' : ''}${c.nullable === false && !c.pk ? ' NOT NULL' : ''}${c.identity ? ' IDENTITY' : ''}`).join(' · ')}</div>${(o.foreignKeys || []).length ? `<div class="text-2xs text-muted">FK: ${o.foreignKeys.map((f) => `${esc(f.columns.join(','))} → ${esc(f.ref)}`).join('; ')}</div>` : ''}${(o.indexes || []).length ? `<div class="text-2xs text-muted">Indexes: ${o.indexes.map((i) => esc(i.name) + (i.unique ? ' (unique)' : '')).join(', ')}</div>` : ''}`
-        : `<div class="text-2xs font-mono text-muted mt-1">(${(o.params || []).map((p) => `${esc(p.name)} ${esc(p.type)}${p.mode && p.mode !== 'IN' ? ' ' + esc(p.mode) : ''}`).join(', ')})</div>${(o.refs || []).length ? `<div class="text-2xs text-muted">Touches: ${o.refs.map((r) => `${esc(r.name)} <span class="badge">${esc([r.mode?.join?.('/') || r.kind, r.status || r.confidence].filter(Boolean).join(' · '))}</span>`).join(' ')}</div>` : ''}${o.encrypted ? '<div class="text-2xs text-muted">definition encrypted or unavailable</div>' : ''}${o.review ? '<div class="text-2xs text-muted">flagged for review (secret literal, not stored)</div>' : ''}${o.dynamic ? '<div class="text-2xs text-muted">dynamic SQL: some references unresolved</div>' : ''}`;
-      const used = t.mapping.filter((m) => m.object === `${o.schema ? o.schema.toLowerCase() + '.' : ''}${o.name.toLowerCase()}` || m.object === o.name.toLowerCase()).slice(0, 3);
-      return `<div class="px-3 py-2 border-b border-line ${o.status === 'removed' ? 'opacity-50' : ''}"><div class="flex items-center gap-2 min-w-0">${icon(o.kind === 'table' ? 'database' : 'braces', 'w-3.5 h-3.5 text-l-system')}<span class="font-medium truncate flex-1">${esc(o.schema ? o.schema + '.' : '')}${esc(o.name)}</span><span class="badge">${esc(o.kind)}</span><span class="badge">${esc(o.confidence || '')}</span>${o.status === 'removed' ? '<span class="badge b-stale">removed</span>' : ''}</div>${det}${used.length ? `<div class="text-2xs text-muted">Used in: ${used.map((m) => `<button class="text-accent font-mono" data-path="${esc(m.file)}">${esc(m.file)}:${m.line}</button>`).join(', ')}</div>` : ''}</div>`;
-    };
-    return `<section class="card mb-4"><div class="p-3 border-b border-line"><div class="flex flex-wrap items-center gap-2"><h2 class="font-semibold">${esc(t.engine || '')} · ${esc(t.database || t.key)}</h2><span class="badge ${ENVC[t.environment] || ''}">${esc(t.environment || 'UNKNOWN')}</span><span class="badge">${esc(t.scope === 'local' ? 'local (mobile) DB' : 'backend DB')}</span><span class="badge">${esc(t.source || '')}</span></div>
-      <p class="text-2xs text-muted mt-1">${esc(t.host || '')}${t.profile ? ' · profile ' + esc(t.profile) : ''} · ${fmt(t.counts?.tables || 0)} tables · ${fmt(t.counts?.procedures || 0)} procedures · ${fmt(t.counts?.views || 0)} views · ${fmt(t.counts?.functions || 0)} functions · discovered ${esc((t.lastDiscoveredAt || '').slice(0, 16).replace('T', ' '))}</p>
-      ${(t.limitations || []).length ? `<details class="mt-1 text-2xs text-muted"><summary>${t.limitations.length} limitation(s)</summary><ul class="list-disc pl-5">${t.limitations.map((l) => `<li>${esc(l)}</li>`).join('')}</ul></details>` : ''}</div>
-      <div>${objs.length ? objs.map(row).join('') : '<div class="p-4 text-muted">No object matches the filter.</div>'}</div></section>`;
-  }).join('');
-  const ch = (I.changes || []).length ? `<section class="card p-4 mb-4"><h3 class="h-sec mb-2">Protected changes <span class="text-faint font-normal">(${I.changes.length})</span></h3>${I.changes.map((c) => `<div class="flex flex-wrap items-center gap-2 py-1 border-b border-line"><span class="font-mono text-xs">${esc(c.id)}</span><span class="badge ${ENVC[c.environment] || ''}">${esc(c.environment)}</span><span class="badge">${esc(c.stage)}</span><span class="text-muted truncate">${esc(c.migration || '')} (${esc(c.framework || '')}) → ${esc(c.target || '')}</span><span class="badge">risk ${esc(c.risk || '')}</span><span class="badge">backup ${esc(c.backup || '')}</span></div>`).join('')}</section>` : '';
-  showPage(header('Database Intelligence', 'Schemas, stored procedures, dependencies and application usage from the knowledge store. Read-only; definitions and credentials are never shown here.', `<input id="dq" class="input sm:w-64" placeholder="Filter tables, columns, procedures…" value="${esc(route.params.get('q') || '')}" aria-label="Filter">`) + ch + cards);
-  $('#dq').onchange = (e) => go('dbintel', '', e.target.value ? { q: e.target.value } : {});
-  bindLinks(page());
+  const P = route.params;
+  const T = all.find((t) => t.key === P.get('t')) || all[0];
+  const TABS = [['table', 'Tables'], ['procedure', 'Stored procedures'], ['view', 'Views'], ['function', 'Functions'], ['trigger', 'Triggers']];
+  const live = (k) => T.objects.filter((o) => o.kind === k);
+  const tab = (TABS.find(([k]) => k === P.get('k')) || TABS.find(([k]) => live(k).length) || TABS[0])[0];
+  const q = (P.get('q') || '').toLowerCase();
+  const keyOf = (o) => `${o.kind}:${o.schema ? o.schema + '.' : ''}${o.name}`;
+  const hay = (o) => (o.name + ' ' + (o.columns || []).map((c) => c.name).join(' ') + ' ' + (o.params || []).map((p) => p.name).join(' ') + ' ' + (o.definition || '')).toLowerCase();
+  const list = live(tab).filter((o) => !q || hay(o).includes(q)).sort((x, y) => (x.status === 'removed') - (y.status === 'removed') || x.name.localeCompare(y.name));
+  const sel = T.objects.find((o) => keyOf(o) === P.get('o')) || (P.get('o') ? null : list[0]);
+  const nav = (extra) => { const n = { t: T.key, k: tab, ...extra }; if (q && !('q' in n)) n.q = q; for (const k of Object.keys(n)) if (n[k] == null || n[k] === '') delete n[k]; return n; };
+  const tabsHtml = TABS.map(([k, label]) => `<button class="px-3 py-1.5 rounded text-sm ${k === tab ? 'bg-hover font-semibold' : 'text-muted hover:bg-hover'}" data-tab="${k}">${label} <span class="text-faint">${live(k).filter((o) => o.status !== 'removed').length}</span></button>`).join('');
+  const rowHtml = (o) => `<button class="flex items-center gap-2 w-full text-left px-3 py-2 border-b border-line hover:bg-hover min-w-0 ${sel && keyOf(o) === keyOf(sel) ? 'bg-hover' : ''} ${o.status === 'removed' ? 'opacity-50' : ''}" data-obj="${esc(keyOf(o))}">${icon(o.kind === 'table' ? 'database' : 'braces', 'w-3.5 h-3.5 text-l-system shrink-0')}<span class="truncate flex-1"><span class="text-faint">${esc(o.schema ? o.schema + '.' : '')}</span>${esc(o.name)}</span><span class="text-2xs text-faint">${o.kind === 'table' ? (o.columns || []).length + ' cols' : (o.params || []).length ? (o.params || []).length + ' params' : ''}</span></button>`;
+  const usedBy = (o) => T.objects.filter((x) => x !== o && x.status !== 'removed' && (x.refs || []).some((r) => r.name.toLowerCase() === o.name.toLowerCase()));
+  const link = (o) => `<button class="text-accent font-mono text-xs" data-obj="${esc(keyOf(o))}" data-kind="${o.kind}">${esc(o.schema ? o.schema + '.' : '')}${esc(o.name)}</button>`;
+  const byName = (n) => T.objects.find((x) => x.name.toLowerCase() === String(n).toLowerCase() && x.status !== 'removed');
+  const mk = (n) => { const o = byName(n); return o ? link(o) : `<span class="font-mono text-xs">${esc(n)}</span>`; };
+  const ddlOf = (o) => {
+    if (o.ddl) return o.ddl;
+    const cols = (o.columns || []).map((c) => `  ${c.name} ${c.type}${c.identity ? ' IDENTITY' : ''}${c.nullable === false ? ' NOT NULL' : ''}`);
+    if (o.primaryKey?.length) cols.push(`  PRIMARY KEY (${o.primaryKey.join(', ')})`);
+    for (const f of o.foreignKeys || []) cols.push(`  FOREIGN KEY (${f.columns.join(', ')}) REFERENCES ${f.ref}${f.refColumns?.length ? '(' + f.refColumns.join(', ') + ')' : ''}`);
+    for (const u of o.uniques || []) cols.push(`  UNIQUE (${u.columns.join(', ')})`);
+    for (const k of o.checks || []) cols.push(`  CHECK (${k.definition})`);
+    return `CREATE TABLE ${o.schema ? o.schema + '.' : ''}${o.name} (\n${cols.join(',\n')}\n);` + (o.indexes || []).map((i) => `\nCREATE ${i.unique ? 'UNIQUE ' : ''}INDEX ${i.name} ON ${o.name} (${i.columns.join(', ')});`).join('');
+  };
+  const detail = (o) => {
+    if (!o) return empty('Select an item to see its structure, dependencies and query.');
+    const used = T.mapping.filter((m) => m.object === `${o.schema ? o.schema.toLowerCase() + '.' : ''}${o.name.toLowerCase()}` || m.object === o.name.toLowerCase());
+    const ub = usedBy(o);
+    const isT = o.kind === 'table';
+    const body = isT ? `${section('Columns', `<div class="overflow-x-auto"><table class="w-full text-xs"><thead><tr class="text-left text-muted"><th class="py-1 pr-3">Name</th><th class="pr-3">Type</th><th class="pr-3">Null</th><th>Key</th></tr></thead><tbody>${(o.columns || []).map((c) => `<tr class="border-t border-line"><td class="py-1 pr-3 font-mono">${esc(c.name)}</td><td class="pr-3 font-mono">${esc(c.type)}</td><td class="pr-3">${c.nullable === false || c.pk ? 'NOT NULL' : 'NULL'}</td><td>${c.pk ? '<span class="badge">PK</span> ' : ''}${c.identity ? '<span class="badge">identity</span>' : ''}</td></tr>`).join('')}</tbody></table></div>`, (o.columns || []).length)}
+      ${(o.foreignKeys || []).length ? section('Foreign keys', o.foreignKeys.map((f) => `<div class="py-1 text-xs">${esc(f.columns.join(', '))} → ${mk(f.ref)}${f.refColumns?.length ? ` (${esc(f.refColumns.join(', '))})` : ''}</div>`).join(''), o.foreignKeys.length) : ''}
+      ${(o.indexes || []).length ? section('Indexes', o.indexes.map((i) => `<div class="py-1 text-xs font-mono">${esc(i.name)} (${esc(i.columns.join(', '))})${i.unique ? ' <span class="badge">unique</span>' : ''}</div>`).join(''), o.indexes.length) : ''}`
+      : `${section('Parameters', (o.params || []).length ? `<table class="w-full text-xs"><tbody>${o.params.map((p) => `<tr class="border-t border-line"><td class="py-1 pr-3 font-mono">${esc(p.name)}</td><td class="pr-3 font-mono">${esc(p.type)}</td><td>${esc(p.mode || 'IN')}</td></tr>`).join('')}</tbody></table>` : '<span class="text-muted">none</span>', (o.params || []).length)}
+      ${section('Touches', (o.refs || []).length ? o.refs.map((r) => `<div class="py-1 text-xs">${mk(r.name)} <span class="badge">${esc([r.kind, (r.mode || []).join?.('/') || r.mode, r.status || r.confidence].filter(Boolean).join(' · '))}</span></div>`).join('') : '<span class="text-muted">no recorded references</span>', (o.refs || []).length)}`;
+    const q = o.definition ? o.definition : isT ? ddlOf(o) : '';
+    const qTitle = o.definition ? 'Query (stored definition)' : isT ? (o.ddl ? 'DDL (from the source)' : 'DDL (generated from the recorded metadata)') : 'Query';
+    const qBody = q ? `<pre class="font-mono text-xs overflow-auto p-3 bg-hover rounded" style="max-height:420px;white-space:pre">${esc(q)}</pre>` : `<p class="text-muted">${o.encrypted ? 'The definition is encrypted or not accessible with the discovery permissions.' : o.review ? 'Not stored: the definition contained a secret literal and was flagged for review.' : 'No definition was recorded. Run discovery against the database or SQL scripts to capture it.'}</p>`;
+    return `<div class="card p-4 mb-4"><div class="flex flex-wrap items-center gap-2"><h2 class="font-semibold text-base font-mono">${esc(o.schema ? o.schema + '.' : '')}${esc(o.name)}</h2><span class="badge">${esc(o.kind)}</span><span class="badge">${esc(o.confidence || '')}</span>${o.status === 'removed' ? '<span class="badge b-stale">removed</span>' : ''}${o.dynamic ? '<span class="badge b-stale">dynamic SQL</span>' : ''}</div>
+      <p class="text-2xs text-muted mt-1">source: ${esc(o.source || '')}${o.file ? ' · ' + esc(o.file) : ''}${o.at ? ' · ' + esc(o.at.slice(0, 16).replace('T', ' ')) : ''}</p></div>
+      ${section(qTitle, qBody)}<div class="grid gap-4 mt-4 xl:grid-cols-2">${body}
+      ${section('Used by (other database objects)', ub.length ? ub.map((x) => `<div class="py-1">${link(x)} <span class="badge">${esc(x.kind)}</span></div>`).join('') : '<span class="text-muted">none recorded</span>', ub.length)}
+      ${section('Used in application code', used.length ? used.slice(0, 20).map((m) => `<div class="py-1 text-xs"><button class="text-accent font-mono" data-path="${esc(m.file)}">${esc(m.file)}:${m.line}</button> <span class="badge">${esc(m.role)}</span> <span class="badge">${esc(m.evidence)}</span></div>`).join('') : '<span class="text-muted">no call site found</span>', used.length)}</div>`;
+  };
+  const ch = (I.changes || []).length ? `<section class="card p-4 mt-4"><h3 class="h-sec mb-2">Protected changes <span class="text-faint font-normal">(${I.changes.length})</span></h3>${I.changes.map((c) => `<div class="flex flex-wrap items-center gap-2 py-1 border-b border-line"><span class="font-mono text-xs">${esc(c.id)}</span><span class="badge ${ENVC[c.environment] || ''}">${esc(c.environment)}</span><span class="badge">${esc(c.stage)}</span><span class="text-muted truncate">${esc(c.migration || '')} (${esc(c.framework || '')}) → ${esc(c.target || '')}</span><span class="badge">risk ${esc(c.risk || '')}</span><span class="badge">backup ${esc(c.backup || '')}</span></div>`).join('')}</section>` : '';
+  const lim = (T.limitations || []).length ? `<details class="mt-1 text-2xs text-muted"><summary>${T.limitations.length} limitation(s)</summary><ul class="list-disc pl-5">${T.limitations.map((l) => `<li>${esc(l)}</li>`).join('')}</ul></details>` : '';
+  const picker = all.length > 1 ? `<select id="dt" class="input sm:w-64" aria-label="Database">${all.map((t) => `<option value="${esc(t.key)}" ${t.key === T.key ? 'selected' : ''}>${esc((t.scope === 'local' ? 'local · ' : '') + (t.engine || '') + ' · ' + (t.database || t.key))}</option>`).join('')}</select>` : '';
+  showPage(header('Database Intelligence', 'Schemas, stored procedures, views and dependencies from the knowledge store. Read-only; credentials are never stored.', `<div class="flex gap-2 w-full sm:w-auto">${picker}<input id="dq" class="input flex-1 sm:w-64" placeholder="Filter by name, column, parameter or query…" value="${esc(P.get('q') || '')}" aria-label="Filter"></div>`)
+    + `<div class="card p-3 mb-4"><div class="flex flex-wrap items-center gap-2"><strong>${esc(T.engine || '')} · ${esc(T.database || T.key)}</strong><span class="badge ${ENVC[T.environment] || ''}">${esc(T.environment || 'UNKNOWN')}</span><span class="badge">${esc(T.scope === 'local' ? 'local (mobile) DB' : 'backend DB')}</span><span class="badge">${esc(T.source || '')}</span></div><p class="text-2xs text-muted mt-1">${esc(T.host || '')}${T.profile ? ' · profile ' + esc(T.profile) : ''} · discovered ${esc((T.lastDiscoveredAt || '').slice(0, 16).replace('T', ' '))}</p>${lim}</div>
+    <div class="flex flex-wrap gap-1 mb-3" role="tablist">${tabsHtml}</div>
+    <div class="flex flex-col lg:flex-row gap-4"><section class="card lg:w-80 xl:w-96 shrink-0 overflow-auto" style="max-height:calc(100vh - 330px);min-height:200px">${list.length ? list.map(rowHtml).join('') : '<div class="p-4 text-muted">Nothing in this tab' + (q ? ' matches the filter' : '') + '.</div>'}</section>
+    <section class="flex-1 min-w-0" id="dbdetail">${detail(sel)}</section></div>` + ch);
+  const root = page();
+  root.querySelectorAll('[data-tab]').forEach((b) => { b.onclick = () => go('dbintel', '', nav({ k: b.dataset.tab, o: '' })); });
+  root.querySelectorAll('[data-obj]').forEach((b) => { b.onclick = (e) => { e.preventDefault(); const k = b.dataset.obj; go('dbintel', '', nav({ k: k.split(':')[0], o: k })); }; });
+  $('#dq').onchange = (e) => go('dbintel', '', nav({ q: e.target.value, o: '' }));
+  const dt = $('#dt'); if (dt) dt.onchange = () => go('dbintel', '', { t: dt.value });
+  bindLinks(root);
 }
 function drawMobile() {
   const M = D.dbIntel?.mobile;
