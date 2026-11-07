@@ -56,6 +56,36 @@ function compiledCss() {
   throw new Error('scripts/viewer/viewer.css is missing and Tailwind could not be run (needs npx).');
 }
 
+// Database + mobile knowledge for the viewer: structure and metadata only (no definitions, no credentials).
+function dbIntel(c) {
+  const out = { targets: [], mobile: null, changes: [] };
+  try {
+    const dir = c.p('database'); const man = readJson(path.join(dir, 'manifest.json'), null);
+    for (const [key, t] of Object.entries(man?.targets || {})) {
+      const base = path.join(dir, t.scope, key); const idx = readJson(path.join(base, 'index.json'), { items: [] });
+      const objs = [];
+      for (const sub of ['schemas/tables', 'routines/procedures', 'routines/functions', 'routines/views', 'routines/triggers']) {
+        const d = path.join(base, sub); if (!fs.existsSync(d)) continue;
+        for (const f of fs.readdirSync(d).filter((x) => x.endsWith('.json'))) { const o = readJson(path.join(d, f), null); if (!o) continue;
+          objs.push({ kind: o.kind, schema: o.schema, name: o.name, status: o.status, confidence: o.confidence, source: o.provenance?.source, file: o.provenance?.file, at: o.provenance?.updatedAt,
+            columns: o.columns?.map((x) => ({ name: x.name, type: x.type, pk: x.pk || undefined, nullable: x.nullable, identity: x.identity || undefined })), primaryKey: o.primaryKey, foreignKeys: o.foreignKeys?.map((x) => ({ columns: x.columns, ref: x.ref?.name, refColumns: x.refColumns })),
+            indexes: o.indexes?.map((x) => ({ name: x.name, columns: x.columns, unique: x.unique })), params: o.params, encrypted: o.encrypted, review: o.reviewRequired, dynamic: o.dynamicSql, refs: o.references?.map((r) => ({ name: r.name, kind: r.kind, mode: r.mode, status: r.status, confidence: r.confidence })) }); }
+      }
+      const map = readJson(path.join(base, 'application-mapping', 'index.json'), { items: [], chain: [] });
+      out.targets.push({ key, scope: t.scope, engine: t.engine, database: t.database, host: t.host, profile: t.profile, environment: t.environment, source: t.source, lastDiscoveredAt: t.lastDiscoveredAt, counts: t.counts, limitations: t.limitations, objects: objs, relationships: readJson(path.join(base, 'relationships.json'), { items: [] }).items, mapping: map.items.slice(0, 400), chain: map.chain.slice(0, 200), stats: idx.counts });
+    }
+  } catch { /* optional */ }
+  try {
+    const d = c.p('mobile'); const m = readJson(path.join(d, 'manifest.json'), null);
+    if (m) out.mobile = { manifest: m, architecture: readJson(path.join(d, 'architecture.json'), {}), state: readJson(path.join(d, 'state-management.json'), {}).items || [], data: readJson(path.join(d, 'data-layer.json'), {}), deps: readJson(path.join(d, 'dependencies.json'), {}), navigation: (readJson(path.join(d, 'navigation.json'), {}).items || []).slice(0, 100) };
+  } catch { /* optional */ }
+  try {
+    const d = c.p('state', 'database-changes');
+    if (fs.existsSync(d)) out.changes = fs.readdirSync(d).filter((f) => f.endsWith('.json')).map((f) => readJson(path.join(d, f), null)).filter(Boolean).map((p) => ({ id: p.id, stage: p.stage, environment: p.environment, target: p.target?.database || p.target?.id, risk: p.risk, backup: p.backup?.status, migration: p.migration?.file, framework: p.migration?.framework, destructive: p.destructive, createdAt: p.createdAt }));
+  } catch { /* optional */ }
+  return out;
+}
+
 export function buildViewer(c) {
   const g = G.loadGraph(c);
   const manifest = readJson(c.manifest);
@@ -78,7 +108,7 @@ export function buildViewer(c) {
     }),
     rtm: G.rtm(g).map((r) => ({ id: r.requirement.id, status: r.status })),
     plan, progress: plan ? progress(c, plan) : null, critical: plan && !plan.invalid ? criticalPath(plan).path : [],
-    files: files(c), handoffs, notes: notes(c), autoContext: contextStatus(c),
+    files: files(c), handoffs, notes: notes(c), autoContext: contextStatus(c), dbIntel: dbIntel(c),
   };
   const read = (f) => fs.readFileSync(path.join(VIEWER_DIR, f), 'utf8');
   const core = read('graph-core.mjs').replace(/^export /gm, '');

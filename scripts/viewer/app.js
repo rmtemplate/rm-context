@@ -151,7 +151,7 @@ const nameCell = (n) => `<span class="flex items-center gap-2 min-w-0">${layerDo
 
 const NAV = [
   ['Workspace', [['overview', 'Overview', 'dashboard', () => ''], ['explorer', 'File Explorer', 'tree', () => FILES.length], ['search', 'Search', 'search', () => '']]],
-  ['Code Intelligence', [['list/modules', 'Modules', 'layers'], ['list/code', 'Functions & Classes', 'braces'], ['list/dependencies', 'Dependencies', 'package'], ['list/apis', 'API Explorer', 'globe'], ['list/data', 'Database Explorer', 'database']]],
+  ['Code Intelligence', [['list/modules', 'Modules', 'layers'], ['list/code', 'Functions & Classes', 'braces'], ['list/dependencies', 'Dependencies', 'package'], ['list/apis', 'API Explorer', 'globe'], ['list/data', 'Database Explorer', 'database'], ['dbintel', 'Database Intelligence', 'database', () => (D.dbIntel?.targets || []).reduce((a, t) => a + t.objects.filter((o) => o.status !== 'removed').length, 0) || ''], ['mobile', 'Mobile', 'layers', () => (D.dbIntel?.mobile ? D.dbIntel.mobile.manifest.platforms.length : '')]]],
   ['Architecture', [['graph', 'Graph', 'graph', () => NODES.length], ['list/infra', 'Infrastructure', 'server'], ['list/integrations', 'Integrations', 'plug']]],
   ['Project Knowledge', [['list/requirements', 'Business Requirements', 'clipboard'], ['documents', 'Technical Documents', 'doc', () => DOCS.length], ['project', 'Project Management', 'gantt', () => D.plan?.tasks?.length || 0], ['handoffs', 'Agent Handoffs', 'handoff', () => (D.handoffs || []).length], ['notes', 'Notes', 'note', () => (D.notes || []).length]]],
   ['Utilities', [['context', 'Context Status', 'activity', () => ''], ['settings', 'Settings', 'settings', () => '']]],
@@ -578,6 +578,51 @@ function drawSettings() {
   $$('[data-theme]', page()).forEach((b) => (b.onclick = () => { setTheme(b.dataset.theme); drawSettings(); }));
   $('#clr').onclick = () => { let n = 0; try { for (const k of Object.keys(localStorage)) if (k.startsWith('rmc-viewer:layout:')) { localStorage.removeItem(k); n++; } } catch { /* ignore */ } layoutCache.clear(); $('#clrmsg').textContent = `${n} cached layout(s) cleared`; };
 }
+
+// ---------- Database Intelligence & Mobile (knowledge store; structure and metadata only) ----------
+const ENVC = { PRODUCTION: 'b-stale', STAGING: 'b-stale', UNKNOWN: 'b-stale' };
+function drawDbIntel(route) {
+  const I = D.dbIntel || { targets: [], changes: [] };
+  const all = I.targets;
+  if (!all.length) return showPage(header('Database Intelligence', 'Schemas, stored procedures and dependencies from the knowledge store.') + empty('No database knowledge yet. Run <code>rmc database discover</code> (static, no connection) in this project, then rebuild the viewer.'));
+  const q = (route.params.get('q') || '').toLowerCase();
+  const cards = all.map((t) => {
+    const objs = t.objects.filter((o) => !q || (o.name + ' ' + (o.columns || []).map((c) => c.name).join(' ') + ' ' + (o.params || []).map((p) => p.name).join(' ')).toLowerCase().includes(q));
+    const row = (o) => {
+      const det = o.kind === 'table'
+        ? `<div class="text-2xs font-mono text-muted mt-1">${(o.columns || []).map((c) => `${esc(c.name)} ${esc(c.type)}${c.pk ? ' PK' : ''}${c.nullable === false && !c.pk ? ' NOT NULL' : ''}${c.identity ? ' IDENTITY' : ''}`).join(' · ')}</div>${(o.foreignKeys || []).length ? `<div class="text-2xs text-muted">FK: ${o.foreignKeys.map((f) => `${esc(f.columns.join(','))} → ${esc(f.ref)}`).join('; ')}</div>` : ''}${(o.indexes || []).length ? `<div class="text-2xs text-muted">Indexes: ${o.indexes.map((i) => esc(i.name) + (i.unique ? ' (unique)' : '')).join(', ')}</div>` : ''}`
+        : `<div class="text-2xs font-mono text-muted mt-1">(${(o.params || []).map((p) => `${esc(p.name)} ${esc(p.type)}${p.mode && p.mode !== 'IN' ? ' ' + esc(p.mode) : ''}`).join(', ')})</div>${(o.refs || []).length ? `<div class="text-2xs text-muted">Touches: ${o.refs.map((r) => `${esc(r.name)} <span class="badge">${esc([r.mode?.join?.('/') || r.kind, r.status || r.confidence].filter(Boolean).join(' · '))}</span>`).join(' ')}</div>` : ''}${o.encrypted ? '<div class="text-2xs text-muted">definition encrypted or unavailable</div>' : ''}${o.review ? '<div class="text-2xs text-muted">flagged for review (secret literal, not stored)</div>' : ''}${o.dynamic ? '<div class="text-2xs text-muted">dynamic SQL: some references unresolved</div>' : ''}`;
+      const used = t.mapping.filter((m) => m.object === `${o.schema ? o.schema.toLowerCase() + '.' : ''}${o.name.toLowerCase()}` || m.object === o.name.toLowerCase()).slice(0, 3);
+      return `<div class="px-3 py-2 border-b border-line ${o.status === 'removed' ? 'opacity-50' : ''}"><div class="flex items-center gap-2 min-w-0">${icon(o.kind === 'table' ? 'database' : 'braces', 'w-3.5 h-3.5 text-l-system')}<span class="font-medium truncate flex-1">${esc(o.schema ? o.schema + '.' : '')}${esc(o.name)}</span><span class="badge">${esc(o.kind)}</span><span class="badge">${esc(o.confidence || '')}</span>${o.status === 'removed' ? '<span class="badge b-stale">removed</span>' : ''}</div>${det}${used.length ? `<div class="text-2xs text-muted">Used in: ${used.map((m) => `<button class="text-accent font-mono" data-path="${esc(m.file)}">${esc(m.file)}:${m.line}</button>`).join(', ')}</div>` : ''}</div>`;
+    };
+    return `<section class="card mb-4"><div class="p-3 border-b border-line"><div class="flex flex-wrap items-center gap-2"><h2 class="font-semibold">${esc(t.engine || '')} · ${esc(t.database || t.key)}</h2><span class="badge ${ENVC[t.environment] || ''}">${esc(t.environment || 'UNKNOWN')}</span><span class="badge">${esc(t.scope === 'local' ? 'local (mobile) DB' : 'backend DB')}</span><span class="badge">${esc(t.source || '')}</span></div>
+      <p class="text-2xs text-muted mt-1">${esc(t.host || '')}${t.profile ? ' · profile ' + esc(t.profile) : ''} · ${fmt(t.counts?.tables || 0)} tables · ${fmt(t.counts?.procedures || 0)} procedures · ${fmt(t.counts?.views || 0)} views · ${fmt(t.counts?.functions || 0)} functions · discovered ${esc((t.lastDiscoveredAt || '').slice(0, 16).replace('T', ' '))}</p>
+      ${(t.limitations || []).length ? `<details class="mt-1 text-2xs text-muted"><summary>${t.limitations.length} limitation(s)</summary><ul class="list-disc pl-5">${t.limitations.map((l) => `<li>${esc(l)}</li>`).join('')}</ul></details>` : ''}</div>
+      <div>${objs.length ? objs.map(row).join('') : '<div class="p-4 text-muted">No object matches the filter.</div>'}</div></section>`;
+  }).join('');
+  const ch = (I.changes || []).length ? `<section class="card p-4 mb-4"><h3 class="h-sec mb-2">Protected changes <span class="text-faint font-normal">(${I.changes.length})</span></h3>${I.changes.map((c) => `<div class="flex flex-wrap items-center gap-2 py-1 border-b border-line"><span class="font-mono text-xs">${esc(c.id)}</span><span class="badge ${ENVC[c.environment] || ''}">${esc(c.environment)}</span><span class="badge">${esc(c.stage)}</span><span class="text-muted truncate">${esc(c.migration || '')} (${esc(c.framework || '')}) → ${esc(c.target || '')}</span><span class="badge">risk ${esc(c.risk || '')}</span><span class="badge">backup ${esc(c.backup || '')}</span></div>`).join('')}</section>` : '';
+  showPage(header('Database Intelligence', 'Schemas, stored procedures, dependencies and application usage from the knowledge store. Read-only; definitions and credentials are never shown here.', `<input id="dq" class="input sm:w-64" placeholder="Filter tables, columns, procedures…" value="${esc(route.params.get('q') || '')}" aria-label="Filter">`) + ch + cards);
+  $('#dq').onchange = (e) => go('dbintel', '', e.target.value ? { q: e.target.value } : {});
+  bindLinks(page());
+}
+function drawMobile() {
+  const M = D.dbIntel?.mobile;
+  if (!M) return showPage(header('Mobile', 'Android, Flutter and React Native architecture.') + empty('No mobile knowledge. Run <code>rmc mobile detect</code> in a mobile project, then rebuild the viewer.'));
+  const items = (list, f) => (list || []).map(f).join('') || '<span class="text-muted">none</span>';
+  const pill = (a) => `<div class="py-1 border-b border-line"><span class="font-medium">${esc(a.name)}</span> <span class="badge">${esc(a.status)}</span> <span class="badge">${esc(a.confidence)}</span>${a.note ? `<div class="text-2xs text-muted">${esc(a.note)}</div>` : ''}<div class="text-2xs font-mono text-muted">${(a.evidence || []).map((e) => `${esc(e.file)}${e.line ? ':' + e.line : ''}`).join(' · ')}</div></div>`;
+  const d = M.data || {};
+  showPage(header('Mobile', `${M.manifest.platforms.map(esc).join(', ')} · static analysis, no device data`) + `<div class="grid gap-4 lg:grid-cols-2">
+    ${section('Architecture', items(M.architecture.architecture, pill), (M.architecture.architecture || []).length)}
+    ${section('State management', items(M.state, pill), M.state.length)}
+    ${section('Local persistence', items(d.local, pill), (d.local || []).length)}
+    ${section('Remote API clients (not the local database)', items(d.remote, pill), (d.remote || []).length)}
+    ${section('Caches / key-value', items(d.cache, pill), (d.cache || []).length)}
+    ${section('Dependency chains', items((M.deps.chains || []).slice(0, 40), (c) => `<div class="py-1 border-b border-line font-mono text-xs">${esc(c)}</div>`), (M.deps.chains || []).length)}
+    ${section('DAOs', items(d.daos, (x) => `<div class="py-1 border-b border-line"><button class="text-accent font-mono" data-path="${esc(x.file)}">${esc(x.name)}</button> <span class="text-2xs text-muted">${(x.queries || []).map((q) => esc(q.method)).join(', ')}</span></div>`), (d.daos || []).length)}
+    ${section('Navigation', items(M.navigation.slice(0, 40), (n) => `<div class="py-1 border-b border-line text-xs"><span class="badge">${esc(n.kind)}</span> ${esc(n.destination)}</div>`), M.navigation.length)}
+  </div>`);
+  bindLinks(page());
+}
 function drawNotFound() { showPage(header('Not found') + empty('This view does not exist. <a href="#/overview">Go to the overview</a>.')); }
 
 // ---------- details panel ----------
@@ -614,6 +659,8 @@ function showNode(id) {
 }
 function bindLinks(root) {
   root.addEventListener('click', (e) => {
+    const fp = e.target.closest('[data-path]');
+    if (fp && root.contains(fp) && !fp.closest('#tree')) { e.preventDefault(); go('explorer', '', { p: fp.dataset.path }); return; }
     const b = e.target.closest('[data-node]');
     if (!b || !root.contains(b)) return;
     e.preventDefault();
@@ -1084,7 +1131,7 @@ function drawGraph(route) {
 function setTheme(t) { store.set('theme', t); if (t === 'system') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = t; readColors(); requestDraw(); }
 
 // ---------- render loop ----------
-const PAGES = { overview: drawOverview, explorer: drawExplorer, list: drawList, graph: drawGraph, documents: drawDocuments, project: drawProject, handoffs: drawHandoffs, notes: drawNotes, search: drawSearch, context: drawContext, settings: drawSettings };
+const PAGES = { dbintel: drawDbIntel, mobile: drawMobile, overview: drawOverview, explorer: drawExplorer, list: drawList, graph: drawGraph, documents: drawDocuments, project: drawProject, handoffs: drawHandoffs, notes: drawNotes, search: drawSearch, context: drawContext, settings: drawSettings };
 function render() {
   const route = parseRoute();
   drawNav(route);

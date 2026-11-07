@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.1
+
+### Added
+- **Viewer:** *Database Intelligence* and *Mobile* pages (tables, columns, keys, indexes, procedures, parameters, dependencies, application usage, limitations, protected changes; mobile architecture, state, data layer, chains). Metadata only.
+
 ## 0.5.0
 
 ### Added — Database & Mobile Intelligence, protected schema changes, main-session model policy
@@ -9,6 +14,7 @@
 - **`pre-bash` hook:** asks before approvals/protected steps, denies mutating database clients and, during an active change, direct clients and migration runners.
 - **`rmc mobile`:** Android (Kotlin/Java), Flutter and React Native detection from build files and dependencies; architecture and state management with status, evidence, confidence and timestamp; local persistence kept separate from remote APIs; dependency chains from declared types only.
 - **`rmc session-model`:** which model the MAIN session should run (Sonnet for coding, Opus for architecture/security) and what Claude Code allows: PARTIALLY SUPPORTED (user `/model`, `opusplan`); automatic switching by a plugin is UNSUPPORTED. RM Context recommends once per phase, never spawns an agent for a model, never records the desired model as the actual one.
+- **Viewer:** new *Database Intelligence* and *Mobile* pages (tables with columns/keys/indexes, procedures with parameters and touched objects, application usage, limitations, protected changes; mobile architecture, state, data layer, chains). Metadata only: no definitions, no credentials.
 - **CLAUDE.md policy 3:** direct-first, main-session model guidance, database & mobile knowledge, database safety.
 
 ### Added

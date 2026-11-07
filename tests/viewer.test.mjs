@@ -145,7 +145,7 @@ test('viewer renders every main route without script errors', { skip: !chrome &&
   // A Windows browser driven from WSL gets a UNC path (\\wsl.localhost\<distro>\…), whose file URL is file://<host>/…, not file:///<host>/….
   const hp = hostPath(chrome, page).replace(/\\/g, '/');
   const url = (r) => (hp.startsWith('//') ? 'file:' + hp : 'file:///' + hp.replace(/^\/+/, '')) + r;
-  const routes = ['#/overview', '#/explorer?p=src/routes/users.js', '#/list/apis?n=api:POST%20/users', '#/graph/all', '#/graph/module', '#/graph/all?focus=table:users&impact=1', '#/notes', '#/context', '#/documents?d=ERD-001'];
+  const routes = ['#/dbintel', '#/mobile', '#/overview', '#/explorer?p=src/routes/users.js', '#/list/apis?n=api:POST%20/users', '#/graph/all', '#/graph/module', '#/graph/all?focus=table:users&impact=1', '#/notes', '#/context', '#/documents?d=ERD-001'];
   for (const r of routes) {
     for (const size of ['1400,900', '390,844']) {
       const dom = execFileSync(chrome, ['--headless=new', '--disable-gpu', `--window-size=${size}`, '--virtual-time-budget=2000', '--dump-dom', url(r)], { encoding: 'utf8', maxBuffer: 1 << 27, stdio: ['ignore', 'pipe', 'ignore'] });
