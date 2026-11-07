@@ -6,6 +6,7 @@
 //   post-tool      → records files changed by Write/Edit/MultiEdit/NotebookEdit, or a possibly-mutating Bash command
 //   stop           → one coalesced incremental refresh for everything recorded during the turn, plus the turn's own
 //                    main-session token usage (read from the transcript, metadata only)
+//   pre-bash       → database permission boundary: ask before protected steps, deny db clients/migration runners during a protected change
 //   pre-agent      → RM Context agents run in the foreground, one at a time (denies run_in_background / a second agent /
 //                    an agent started inside an RM Context agent); during a workflow only the started stage's agent and model
 //   post-agent     → reports the model that actually ran, read from the subagent transcript (never from configuration),
@@ -67,6 +68,22 @@ try {
         X.logEvent(c, { event: 'prompt', terms: r.terms, hits: r.hits, tokens: r.text ? r.tokens : 0, ms: r.ms });
         if (r.text) parts.push(r.text);
       }
+      // Main-session model advice (never an agent): a hint only, once per phase, when the desired family differs from the active one.
+      if (eligible && conf.enabled) {
+        try {
+          const R = await import('./lib/routing.mjs'); const SM = await import('./lib/session-model.mjs');
+          const k = R.classifyPrompt(prompt, { hits, projectName: JSON.parse(fs.readFileSync(c.manifest, 'utf8')).project?.name });
+          const ss = D.readSession(sid);
+          if (ss.sessionModel) {
+            const userModel = /\b(use|pakai|gunakan|switch to|stay on)\s+(opus|sonnet|haiku)\b/i.exec(prompt)?.[2];
+            const plan = SM.planMainSession({ category: k.category, signals: k.signals, activeModel: ss.sessionModel, initialModel: ss.initialModel || ss.sessionModel, userModel });
+            if (!ss.initialModel) { ss.initialModel = ss.sessionModel; D.writeSession(sid, ss); }
+            const hint = SM.sessionHint(plan);
+            if (hint && ss.advised !== plan.desiredModel) { parts.push(hint); SM.recordSession(c, plan); const s2 = D.readSession(sid); s2.advised = plan.desiredModel; D.writeSession(sid, s2); }
+            else if (!hint && plan.action === 'none') { const s2 = D.readSession(sid); if (s2.advised) { delete s2.advised; D.writeSession(sid, s2); } }
+          }
+        } catch { /* advice is optional */ }
+      }
       const s = eligible ? (await import('./lib/routing.mjs')).suggestForPrompt(c, prompt, { sessionModel: D.readSession(sid).sessionModel, hits }) : null;
       const { text, ...meta } = s || {};
       const turn = D.startTurn(sid, c.root, s ? meta : null, input.transcript_path);
@@ -91,6 +108,15 @@ try {
     if (deny) {
       if (c) X.logEvent(c, { event: 'delegation-denied', sid: input.session_id, agent: input.tool_input?.subagent_type, kind: deny.kind });
       emit({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: deny.reason } });
+    }
+  }
+
+  else if (event === 'pre-bash') {
+    // Permission boundary for database work: ask before protected steps, deny direct db clients during a protected change.
+    const r = c ? (await import('./lib/database/hook.mjs')).preBash(c, input) : null;
+    if (r) {
+      X.logEvent(c, { event: 'database-guard', sid: input.session_id, decision: r.decision });
+      emit({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: r.decision, permissionDecisionReason: r.reason } });
     }
   }
 

@@ -99,7 +99,7 @@ test('rmc init creates CLAUDE.md with the knowledge-first, reuse-first section w
   assert.match(md, /never because a tool call succeeded/);
   // Compact: the whole section stays a small, fixed cost per session (≈ 3.5 characters per token).
   const section = md.slice(md.indexOf(BEGIN), md.indexOf(END) + END.length);
-  assert.ok(section.length / 3.5 < 650, `section is ${Math.ceil(section.length / 3.5)} estimated tokens`);
+  assert.ok(section.length / 3.5 < 900, `section is ${Math.ceil(section.length / 3.5)} estimated tokens`);
   assert.doesNotMatch(section, /[a-z]:\\|\/home\/|\/Users\/|plugins\/cache/i, 'no machine-specific path or plugin version in CLAUDE.md');
 });
 
@@ -114,10 +114,10 @@ test('an existing CLAUDE.md keeps every user instruction; repeated init and rmc 
   ok(p.dir, 'init');
   assert.equal(claudeMd(p), first);
   assert.match(run(p, ['claude-md']), /section unchanged/);
-  assert.match(run(p, ['claude-md', '--check']), /CLAUDE\.md: current — managed section is current \(policy 2\)/);
+  assert.match(run(p, ['claude-md', '--check']), /CLAUDE\.md: current — managed section is current \(policy 3\)/);
   // Edits inside the markers are replaced; text the user adds after the section is kept.
   fs.writeFileSync(path.join(p.dir, 'CLAUDE.md'), first.replace('**Reuse first.**', '**Reuse maybe.**') + '\r\n## Local notes\r\nUse port 3001.\r\n');
-  assert.match(run(p, ['claude-md', '--check']), /CLAUDE\.md: modified — managed section \(policy 2\) was edited by hand/);
+  assert.match(run(p, ['claude-md', '--check']), /CLAUDE\.md: modified — managed section \(policy 3\) was edited by hand/);
   assert.match(run(p, ['claude-md']), /section updated/);
   const after = claudeMd(p);
   assert.ok(after.startsWith(user));

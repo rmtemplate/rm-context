@@ -233,3 +233,7 @@ If the stronger model is blocked too, report to the user.
 3. List affected BRs, modules, APIs and tables, files, infrastructure, plan tasks and documents.
 4. Write the change impact report: `rmc impact … --out .rmcontext/project-management/impact-<slug>.md`, then add the narrative.
 5. Record or adjust graph edges and flag affected documents (`rmc doc revise` when edited).
+
+## Database and mobile work
+
+Database tasks get only the relevant tables, procedures, parameters and application call sites (`rmc database find|show`); mobile tasks get the detected pattern and the chain Screen → ViewModel/BLoC → UseCase → Repository → DAO/API (`rmc mobile find`). Discovery is read-only in every environment. Schema changes follow the environment policy in the `database-intelligence` skill: DEV migration-first without backup objects, STAGING user-applied (or a Claude apply with verified backup), PRODUCTION strict, UNKNOWN blocked.

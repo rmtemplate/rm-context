@@ -84,7 +84,7 @@ test('replace: refused without explicit confirmation (nothing written), then bac
   assert.match(out, /section replaced \(backup: \.rmcontext\/backups\/CLAUDE\.md\.[\w-]+\.bak\)/);
   const [bak] = backups(d);
   assert.equal(fs.readFileSync(path.join(d, '.rmcontext/backups', bak), 'utf8'), MANUAL, 'the backup is the old file, byte for byte');
-  assert.ok(md(d).startsWith('<!-- BEGIN RM CONTEXT · policy 2'));
+  assert.ok(md(d).startsWith('<!-- BEGIN RM CONTEXT · policy 3'));
   assert.doesNotMatch(md(d), /Team rules/);
   assert.equal(readJson(path.join(d, '.rmcontext/config.json')).claudeMdStrategy, 'replace');
   // Idempotent, and a remembered "replace" never replaces again: text added later is kept.
@@ -107,11 +107,11 @@ test('existing project: a manual CLAUDE.md is combined; an old managed section i
   // Managed section from the first release (policy 1) between user text: upgraded, still one section, user text kept.
   const l = existing({ claudeMd: `# Mine\n\n${LEGACY}\n\n## After\nStay.\n` });
   const st = check(l);
-  assert.deepEqual([st.state, st.policy, st.generator], ['outdated', 1, 2]);
-  assert.match(ok(l, 'claude-md', '--check'), /outdated — managed section uses policy 1; the active generator writes policy 2/);
+  assert.deepEqual([st.state, st.policy, st.generator], ['outdated', 1, 3]);
+  assert.match(ok(l, 'claude-md', '--check'), /outdated — managed section uses policy 1; the active generator writes policy 3/);
   ok(l, 'init');
   const up = md(l);
-  assert.match(up, /^# Mine\n\n<!-- BEGIN RM CONTEXT · policy 2[\s\S]*<!-- END RM CONTEXT -->\n\n## After\nStay\.\n$/);
+  assert.match(up, /^# Mine\n\n<!-- BEGIN RM CONTEXT · policy 3[\s\S]*<!-- END RM CONTEXT -->\n\n## After\nStay\.\n$/);
   assert.doesNotMatch(up, /Old policy text/);
   assert.equal(up.split('<!-- BEGIN RM CONTEXT').length - 1, 1);
   assert.match(up, /\*\*Reuse first\.\*\*/);

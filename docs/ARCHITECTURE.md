@@ -361,3 +361,12 @@ Verified at runtime with Claude Code 2.1.318 (headless `claude -p --plugin-dir`)
   - `PostToolUse` recorded the edit
   - `Stop` ran one targeted refresh in 38 ms (graph +1 node, `refundOrder`; `fullScan: false`)
   - total session cost: $0.006
+
+## Database & mobile intelligence
+
+`scripts/lib/database/`: `sql.mjs` (comment/string blanking, statement splitting, DDL and reference parser), `guard.mjs` (allow-list read-only guard, shell classification), `config.mjs` (secret-safe detectors, environment classification, migration frameworks), `adapters.mjs` (SELECT-only catalog queries per engine, canonical model, executors), `store.mjs` (knowledge store, incremental refresh, retrieval, application mapping, graph links), `backup.mjs` (backup names, per-engine backup DDL, verification queries), `change.mjs` (policy, plans, approvals, mutation gate, audit, rollback, apply), `hook.mjs` (PreToolUse Bash boundary), `context.mjs` (bounded task context), `cli.mjs`. `scripts/lib/mobile.mjs` writes `.rmcontext/mobile/`. Knowledge: `.rmcontext/database/<backend|local>/<target>/{schemas/tables, routines/{procedures,functions,views,triggers}, dependencies, relationships.json, application-mapping, index.json}`; state: `state/database-changes/`, `state/database-audit.jsonl`; local artifacts (git-ignored): `backups/database/<YYYYMMDD>/`.
+
+## Main-session model policy
+
+`scripts/lib/session-model.mjs`: `CAPABILITY` (audit result), `desiredMainModel`, `planMainSession`, `sessionHint`, `recordSession` (`model-switch` telemetry: initial, active, desired, actual, result; `verified: false` unless a later prompt shows a different active family). The `prompt` hook adds one hint per phase; nothing here calls a model or an agent.
+

@@ -259,6 +259,23 @@ A profile is **VERIFIED** with at least 3 valid pairs (5–10 recommended), **IN
 
 **Platform limits.** RM Context recommends a model for each delegated agent. Applying it depends on the platform. In Claude Code, the model is set on the subagent; **your main session's model never changes** (use `/model` for that). Without an adapter, `rmc route` is a recommendation only.
 
+## Database & mobile intelligence
+
+`rmc database discover|refresh|find|show|map|migrations|target|plan-change|package|backup|verify-backup|rollback|approve|apply` and `rmc mobile detect|status|show|find`. Discovery is **read-only in every environment** and enforced in the CLI, the adapter and the `pre-bash` permission hook. Credentials, connection strings and tokens are never stored or shown.
+
+| Environment | Schema / procedure change |
+|---|---|
+| UNKNOWN | blocked until `rmc database target confirm` |
+| LOCAL / DEV / TEST | migration file in the project's framework, then the project's own migration command; no backup objects; destructive changes need approval |
+| STAGING | package for the user to apply; or a Claude apply with verified backup, two approvals, rollback, audit |
+| PRODUCTION | strict; plan only unless the user explicitly asks; + native backup attestation for high-risk changes |
+
+Engines: SQL Server, MySQL/MariaDB, PostgreSQL, SQLite. Live server execution goes through the vendor CLI (`sqlcmd`, `mysql`, `psql`) and has not been exercised against a real server by the test suite (mocked catalogs and one real SQLite fixture file). Mobile: Android, Flutter, React Native (static analysis; no device or emulator). See `skills/database-intelligence/SKILL.md`.
+
+## Main-session model policy
+
+`rmc session-model --capability`. Claude Code lets the **user** switch the main session (`/model`) and offers `opusplan` (Opus while planning, Sonnet while executing). A plugin, hook or agent cannot switch it, so RM Context only recommends (Sonnet for coding, Opus for architecture/security), once per phase, and never creates an agent just to obtain another model. Status: PARTIALLY SUPPORTED; runtime switching behaviour is a host feature that the offline test suite cannot verify.
+
 ## Persistent project knowledge
 
 `rmc init` creates `.rmcontext/` in your repository. `rmc refresh` re-reads only changed files.

@@ -1,6 +1,15 @@
 # Changelog
 
-## Unreleased
+## 0.5.0
+
+### Added — Database & Mobile Intelligence, protected schema changes, main-session model policy
+- **`rmc database`** (`scripts/lib/database/`): secret-safe config detection (Web.config, appsettings, Laravel/NestJS `.env`, Prisma/TypeORM, Spring, Django, docker-compose) keeping only engine, host, database, profile and source; environment classification (LOCAL/DEV/TEST/STAGING/PRODUCTION/UNKNOWN from two agreeing signals or a user confirmation); SELECT-only catalog adapters for SQL Server, MySQL/MariaDB, PostgreSQL and SQLite (read-only `node:sqlite`); static fallback from SQL scripts; per-object knowledge under `.rmcontext/database/{backend,local}/` with hashes, provenance, history, removed-object marking and incremental refresh; procedure/table/view dependencies; application call-site mapping; `find` / `show`.
+- **Read-only guard** (allow-list) on every discovery statement, in the CLI/adapter layer. A connection needs explicit approval of the exact target; credentials come only from environment variables the user names.
+- **Protected changes:** DEV = migration only (no backup objects), STAGING = user-applied package (or a Claude apply with verified `_rmc_YYYYMMDD` backup + two approvals), PRODUCTION = strict (+ native backup attestation), UNKNOWN blocks. Approvals are exact phrases bound to environment, database, plan and stage; a mutation gate only sends statements registered in the approved plan; audit log holds hashes and metadata only; rollback script generated, never run automatically. `.rmcontext/backups/` is git-ignored.
+- **`pre-bash` hook:** asks before approvals/protected steps, denies mutating database clients and, during an active change, direct clients and migration runners.
+- **`rmc mobile`:** Android (Kotlin/Java), Flutter and React Native detection from build files and dependencies; architecture and state management with status, evidence, confidence and timestamp; local persistence kept separate from remote APIs; dependency chains from declared types only.
+- **`rmc session-model`:** which model the MAIN session should run (Sonnet for coding, Opus for architecture/security) and what Claude Code allows: PARTIALLY SUPPORTED (user `/model`, `opusplan`); automatic switching by a plugin is UNSUPPORTED. RM Context recommends once per phase, never spawns an agent for a model, never records the desired model as the actual one.
+- **CLAUDE.md policy 3:** direct-first, main-session model guidance, database & mobile knowledge, database safety.
 
 ### Added
 - **Route intelligence engine** (`scripts/lib/routes/`). A dependency-free tokenizer and structural parser replace the C# and Java route regexes. Shared strategies cover declarative routing (class prefix + method annotations) and registration routing (fluent calls, groups, scopes, mounts, registration functions resolved through their call sites).

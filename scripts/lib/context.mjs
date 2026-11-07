@@ -7,6 +7,7 @@ import { ctx, readJson, writeJson, now, toPosix } from './util.mjs';
 import { loadModelConfig } from './routing.mjs';
 import { findSecrets } from './ignore.mjs';
 import * as G from './graph.mjs';
+import { dataMobileContext } from './database/context.mjs';
 
 export const AUTO_DEFAULTS = {
   enabled: true, sessionStart: true, promptRetrieval: true, incrementalRefresh: true,
@@ -377,6 +378,13 @@ export function retrieveTargeted(c, task, { criteria = [], ...override } = {}) {
     eliminatedSample: eliminated,
     reuse: [...reuse.keys()].slice(0, 8), reuseShown: r.reuseShown || 0, tokens: r.tokens,
   };
+  // Selective database / mobile knowledge: only objects that match this task, bounded by the remaining budget.
+  const budget = ({ ...autoConfig(c), ...override }.maxContextTokens || 900) - (r.tokens || 0);
+  const extra = budget >= 80 ? dataMobileContext(c.root, [task, ...criteria].join('\n'), Math.floor(budget * 3.5)) : '';
+  if (extra) {
+    const t = Math.ceil(extra.length / 3.5);
+    return { ...r, text: `${r.text ? r.text + '\n\n' : ''}${extra}`, tokens: (r.tokens || 0) + t, hits: Math.max(r.hits || 0, 1), diag: { ...diag, tokens: (r.tokens || 0) + t, dataMobile: true } };
+  }
   return { ...r, diag };
 }
 

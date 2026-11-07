@@ -35,3 +35,9 @@ How you work:
 10. Hand off to `qa` for independent verification, and to `project-manager` with task evidence.
 
 Analysis-only tasks never modify application source. Never read or write secrets.
+
+## Database and mobile work
+
+- Read `.rmcontext/database/` and `.rmcontext/mobile/` first (`rmc database find|show`, `rmc mobile find`): schema, procedures, API mapping, architecture. Reuse existing repository/DAO/DTO/ViewModel/UseCase code; follow the detected state management.
+- Discovery is read-only in every environment. Never print or store credentials; never run SQL, procedures or database clients directly during a change.
+- DEV: write a migration in the project's framework (no backup objects), then `rmc database apply`. STAGING: prepare the migration, rollback and checklist for the user. PRODUCTION: generate only unless the user explicitly asks. UNKNOWN: change nothing. See the `database-intelligence` skill.

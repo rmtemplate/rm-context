@@ -8,7 +8,8 @@
       { "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/hooks.mjs\" prompt", "timeout": 10 } ] }
     ],
     "PreToolUse": [
-      { "matcher": "Agent|Task", "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/hooks.mjs\" pre-agent", "timeout": 5 } ] }
+      { "matcher": "Agent|Task", "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/hooks.mjs\" pre-agent", "timeout": 5 } ] },
+      { "matcher": "Bash", "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/hooks.mjs\" pre-bash", "timeout": 5 } ] }
     ],
     "PostToolUse": [
       { "matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash", "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/hooks.mjs\" post-tool", "timeout": 5 } ] },

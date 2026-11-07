@@ -67,6 +67,16 @@ Project management
   pm mermaid                       Mermaid gantt block for documents
   pm health [--out file.md]        Project health report from evidence
 
+Main-session model
+  session-model [--capability] [--category <c>] [--signals a,b] [--session-model <id>] [--user-model <alias>] [--phase <p>]
+                                   Which model the MAIN session should run for a task and what Claude Code allows (never spawns an agent; never claims a switch)
+
+Database & mobile intelligence
+  database status|discover|refresh|find|show|map|migrations|target|plan-change|change|package|backup|verify-backup|rollback|approve|apply|cancel
+                                   Database Intelligence. Discovery is READ-ONLY in every environment; DEV = migration only,
+                                   STAGING = user applies (or Claude apply with verified backup), PRODUCTION = strict. See: database help
+  mobile detect|status|show|find   Android / Flutter / React Native architecture, state management and local data layer
+
 Options: --root <dir> (default: current directory)`;
 
 async function main(argv) {
@@ -102,6 +112,7 @@ async function main(argv) {
         const { GENERATOR } = await import('./lib/util.mjs');
         return out([`Policy update for an initialized project (no scan: knowledge, graph and telemetry unchanged${created.length ? `; added missing ${created.join(', ')}` : ''}).`,
           `${mdLine(md)} · index: ${indexed}`, P.formatClaudeMdState(P.claudeMdState(c)), ...P.policyReport(c, { generator: GENERATOR, extractorVersion: EXTRACTOR_VERSION }),
+          ...(await (await import('./lib/database/cli.mjs')).intelHint(root)),
           'Full rescan only on request: rmc init --full or rmc refresh --full.'].join('\n'));
       }
       const created = P.initProject(c);
@@ -111,7 +122,8 @@ async function main(argv) {
       const r = scan(root, { full: true });
       const { buildViewer } = await import('./lib/viewer.mjs');
       buildViewer(c);
-      return out(`Initialized ${path.relative(root, c.base) || '.rmcontext'} (${created.length} items created).\n${scanSummary(r)}\nViewer: .rmcontext/viewer/index.html\n${mdLine(md)}`);
+      const intel = await (await import('./lib/database/cli.mjs')).initIntel(root);
+      return out(`Initialized ${path.relative(root, c.base) || '.rmcontext'} (${created.length} items created).\n${scanSummary(r)}\nViewer: .rmcontext/viewer/index.html\n${mdLine(md)}${intel.length ? '\n' + intel.join('\n') : ''}`);
     }
     case 'claude-md': {
       const P = await import('./lib/project.mjs');
@@ -299,6 +311,22 @@ async function main(argv) {
       const prompt = [sub, ...rest].filter(Boolean).join(' ') || fail('Usage: rmc context <prompt…> | --session | status');
       const r = X.retrieve(c, prompt, args['max-tokens'] ? { maxContextTokens: Number(args['max-tokens']) } : {});
       return out(args.json ? r : r.text || `No sufficiently relevant knowledge (searched ${r.terms} term(s)).`);
+    }
+    case 'session-model': {
+      const SM = await import('./lib/session-model.mjs');
+      if (args.capability) return out(args.json ? SM.CAPABILITY : [`Main-session model switching: ${SM.CAPABILITY.status} (automatic switching by a plugin: ${SM.CAPABILITY.automaticSwitchByPlugin}; runtime verified: no)`, `Checked with: ${SM.CAPABILITY.checkedWith}`, ...SM.CAPABILITY.mechanisms.map((m) => `- ${m.name}: ${m.automatic ? 'automatic' : 'manual'} (${m.trigger}) — ${m.note || m.scope}`), 'Not mechanisms: ' + SM.CAPABILITY.notMechanisms.join('; ')].join('\n'));
+      const plan = SM.planMainSession({ category: args.category, signals: String(args.signals || '').split(',').filter(Boolean), phase: args.phase, activeModel: args['session-model'], userModel: args['user-model'] });
+      if (fs.existsSync(c.manifest) && args.record) SM.recordSession(c, plan, { phase: args.phase || null });
+      return out(args.json ? plan : [`Desired main-session model: ${plan.desiredModel} (${plan.reason})`, `Active: ${plan.activeModel || 'unknown'} · action: ${plan.action} · agent: no`, plan.needsSwitch ? `Switching is user-triggered: type ${plan.instruction}. RM Context cannot switch the main session; nothing was switched.` : 'No switch needed.'].join('\n'));
+    }
+    case 'database': {
+      const { databaseCommand } = await import('./lib/database/cli.mjs');
+      return out(await databaseCommand(root, { ...args, _: [sub, ...rest].filter((x) => x !== undefined) }));
+    }
+    case 'mobile': {
+      requireInit(c);
+      const M = await import('./lib/mobile.mjs');
+      return out(M.cli(root, { ...args, _: [sub, ...rest].filter((x) => x !== undefined) }));
     }
     case 'workflow': {
       requireInit(c);
