@@ -854,7 +854,7 @@ Parsing uses a built-in tokenizer and structural parser: no npm dependencies, no
 
 ## Contributing
 
-Issues and pull requests are welcome at [github.com/rmtemplate/rm-context](https://github.com/rmtemplate/rm-context). Please describe:
+Issues and pull requests are welcome at [github.com/rmtemplate/rm-context](https://github.com/rmtemplate/rm-context). See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, checks and ground rules. Please describe:
 - the platform you use
 - your Node.js version
 - the command you ran
