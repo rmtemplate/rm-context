@@ -178,7 +178,7 @@ export async function databaseCommand(root, args, deps = {}) {
     case 'plan-change': {
       if (typeof args.file !== 'string') fail('Usage: rmc database plan-change --file <migration> [--target <id>] [--object table:dbo.Name]');
       const objs = [].concat(args.object || []).filter((x) => typeof x === 'string');
-      const plan = chg.planChange(root, { file: args.file, targetId: typeof args.target === 'string' ? args.target : undefined, objects: objs, targets: targets(root) });
+      const plan = chg.planChange(root, { file: args.file, targetId: typeof args.target === 'string' ? args.target : undefined, objects: objs, targets: targets(root), nowFn: deps.now });
       if (json) return JSON.stringify(chg.statusOf(plan), null, 2);
       say(`Change plan ${plan.id} · ${plan.environment} · ${plan.target.engine} ${plan.target.database || ''} · risk ${plan.risk}`);
       say(`policy: ${plan.policy.description}`);

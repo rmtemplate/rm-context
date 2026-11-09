@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+Not released yet. This section records what early feedback pointed at and what is still open, so it can be checked later. Nothing below is implemented until it moves into a versioned section.
+
+### Under consideration (from early feedback)
+- **Before/after cost example in the README.** A worked example of the same kind of task priced on Opus and on Sonnet, from real usage rather than invented numbers. `rmc route cost` is an estimate from session-transcript token usage at API list prices; a subscription plan is billed differently, and the README example would say so.
+- **Large-repository check.** The graph has been generated for a legacy ASP.NET API with roughly 2,000 source files (about 10,000 nodes and 15,000 links), but refresh speed and completeness (for example routes and tables against a reference) have not been measured. A measured check would turn "it holds up in size" into a documented result.
+- **Retroactive savings summary.** `rmc route cost` (spend per model) and `rmc route stats` (tasks per category) are not yet joined. A combined view could list which task categories ran on Opus and likely did not need it, with an estimated saving. It would be worded as "likely": the plugin cannot verify that Sonnet's output would have matched Opus.
+
+## 0.5.3
+
+### Changed
+- **Model question explains itself:** the main-session model confirmation now names the detected task category as the reason ("Task ini terdeteksi sebagai bug-fix, termasuk pekerjaan yang direkomendasikan menggunakan Sonnet..."). Without a category the generic wording is kept; no reason is invented.
+- **Prompt classifier, Indonesian phrasing:** "tambahkan/buatkan unit test ..." is now classified as QA work, and "buatkan/tambahkan endpoint, API, fitur, halaman, fungsi, method, kolom, field, controller, service" as a small feature (previously the first was not classified and the second was read as system analysis). Found with a seven-prompt spot check, not an accuracy measurement.
+
+### Fixed
+- **`rmc database plan-change`** now uses the injected clock like the other database commands, so a change plan's backup folder date follows it. Three database-safety tests had only passed because they ran on the date they were written.
+
 ## 0.5.2
 
 ### Changed

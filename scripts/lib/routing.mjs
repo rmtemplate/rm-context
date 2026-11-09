@@ -207,9 +207,9 @@ const RULES = [
   ['business-analysis', /business (?:flow|process|rule|logic)|alur bisnis|proses bisnis|aturan bisnis|logika bisnis|\brequirements?\b|kebutuhan bisnis|user stor/i],
   ['doc-update', /\bdocumentation\b|\bdokumentasi\b|^document (?:the|this|our)\b|^dokumentasikan\b/i],
   ['system-analysis', /\bapis?\b|\bendpoints?\b|\bdatabase\b|\bschema\b|\btables?\b|\btabel\b|\bintegrat|\bintegrasi|data model|data flow|alur data/i],
-  ['qa', /test cases?|test plan|acceptance criteria|\bverif(?:y|ikasi)\b|regression/i],
+  ['qa', /test cases?|test plan|acceptance criteria|\bverif(?:y|ikasi)\b|regression|\bunit tests?\b|\btes unit\b|\bbuat(?:kan)? (?:\w+ )?(?:test|tes)\b|\btambah(?:kan)? (?:\w+ )?(?:test|tes)\b/i],
   ['plan', /\bsprint\b|\btimeline\b|\bmilestone|project plan|rencana proyek/i],
-  ['small-feature', /\bimplement|add (?:a |the )?feature|new feature|\btambah(?:kan)? fitur|fitur baru|\bbuild (?:a|the)\b/i],
+  ['small-feature', /\bimplement|add (?:a |the )?feature|new feature|\btambah(?:kan)? fitur|fitur baru|\bbuild (?:a|the)\b|\b(?:buat(?:kan)?|tambah(?:kan)?) (?:\w+ )?(?:endpoint|api|fitur|halaman|fungsi|method|kolom|field|controller|service)\b/i],
   ['bug-fix', /\bbug\b|\bfix\b|\bperbaiki|\bbenerin/i],
   ['search', /\binvestigat|\binvestigasi|\btelusuri|\btrace (?:the|how)\b|\bhow does\b.{0,60}\b(?:work|flow)|bagaimana\b.{0,60}\b(?:bekerja|berjalan|alur|mengalir)|\bwhere\b.{0,60}\b(?:used|called)\b|(?:dipakai|digunakan|dipanggil) di ?mana|\banaly[sz]|\banalis[ia]s?\b|\banalisa\b|\balur\b|\bflow\b/i],
 ];

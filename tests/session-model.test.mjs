@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { ROOT, fixture, ok, rmc, repoTelemetry } from './helpers.mjs';
-import { CAPABILITY, CONFIRMATION, desiredMainModel, planMainSession, sessionHint, applyAnswer } from '../scripts/lib/session-model.mjs';
+import { CAPABILITY, CONFIRMATION, desiredMainModel, planMainSession, sessionHint, applyAnswer, questionFor } from '../scripts/lib/session-model.mjs';
 import { CLAUDE_SECTION } from '../scripts/lib/project.mjs';
 import { classifyPrompt, route } from '../scripts/lib/routing.mjs';
 import { ctx } from '../scripts/lib/util.mjs';
@@ -106,7 +106,8 @@ test('C1. Opus + coding task: the confirmation question with Yes/No is put to th
   const d = fixture('node-app'); ok(d, 'init'); const sid = 'cf1-' + process.pid;
   hook(d, 'session-start', { session_id: sid, model: 'claude-opus-5-5' });
   const t = asked(d, sid, CODING);
-  assert.ok(t.includes(CONFIRMATION.question)); assert.ok(t.includes('Yes, switch to Sonnet.') && t.includes('No, continue with Opus.'));
+  assert.ok(t.includes(questionFor(planMainSession({ category: 'refactor', activeModel: 'claude-opus-5-5' })))); assert.match(t, /Task ini terdeteksi sebagai refactor/);
+  assert.ok(t.includes('Yes, switch to Sonnet.') && t.includes('No, continue with Opus.'));
   assert.match(t, /BEFORE starting the task, ask the user once/); assert.match(t, /wait for their confirmation before implementing/);
   cleanup(sid);
 });
@@ -137,4 +138,26 @@ test('C8. the confirmation never creates or suggests an agent for model routing'
   const plan = planMainSession({ category: 'refactor', activeModel: 'claude-opus-5-5' });
   assert.equal(plan.spawnAgent, false); assert.match(sessionHint(plan), /Do NOT spawn an agent just to get a different model/);
   assert.doesNotMatch(sessionHint(plan), /(use|create|spawn|launch) (a |the )?sonnet (sub)?agent/i);
+});
+
+// ---- The question explains itself; Indonesian task phrasing is classified ----
+test('D1. the confirmation question names the detected task category as the reason', () => {
+  const plan = planMainSession({ category: 'bug-fix', activeModel: 'claude-opus-5-5' });
+  assert.equal(plan.category, 'bug-fix');
+  assert.match(questionFor(plan), /terdeteksi sebagai bug-fix/); assert.match(sessionHint(plan), /terdeteksi sebagai bug-fix/);
+  const other = planMainSession({ category: 'architecture', activeModel: 'claude-sonnet-5-5' });
+  assert.match(questionFor({ ...other, category: 'architecture' }), /terdeteksi sebagai architecture/);
+});
+test('D2. without a category the generic question is kept (no invented reason)', () => {
+  const plan = { ...planMainSession({ category: 'bug-fix', activeModel: 'claude-opus-5-5' }), category: null };
+  assert.equal(questionFor(plan), CONFIRMATION.question); assert.doesNotMatch(questionFor(plan), /terdeteksi sebagai/);
+});
+test('D3. Indonesian task phrasing with English code terms is classified', () => {
+  const cat = (p) => classifyPrompt(p).category;
+  assert.equal(cat('tambahkan unit test untuk UserController'), 'qa');
+  assert.equal(cat('buatkan unit test untuk OrderService'), 'qa');
+  assert.equal(cat('buatkan endpoint baru untuk export report ke CSV'), 'small-feature');
+  assert.equal(cat('tolong fix bug di invoice totals rounding, hasilnya salah di controller'), 'bug-fix');
+  assert.equal(cat('buatkan BRD untuk modul payment'), 'brd');
+  assert.equal(classifyPrompt('apa itu repository pattern?').decision, 'direct');
 });

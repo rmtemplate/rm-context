@@ -1,6 +1,6 @@
 {
   "name": "rm-context",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "private": true,
   "description": "RM Context — Claude Code plugin: project intelligence and engineering team.",
   "type": "module",

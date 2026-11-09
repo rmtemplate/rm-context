@@ -47,7 +47,7 @@ export function planMainSession({ category, signals = [], phase, activeModel, us
   const want = desiredMainModel({ category, signals, phase });
   const active = familyOf(activeModel);
   const desired = want.model === 'current' ? (active || 'current') : want.model;
-  const base = { spawnAgent: false, initialModel: familyOf(initialModel) || active || null, activeModel: active, desiredModel: desired, reason: want.reason, capability: CAPABILITY.status, claimedSwitched: false, actualModel: active };
+  const base = { category: category || null, spawnAgent: false, initialModel: familyOf(initialModel) || active || null, activeModel: active, desiredModel: desired, reason: want.reason, capability: CAPABILITY.status, claimedSwitched: false, actualModel: active };
   if (userModel) return { ...base, desiredModel: familyOf(userModel) || userModel, action: 'honor-user-choice', needsSwitch: false, reason: 'the user chose a model explicitly' };
   if (!active) return { ...base, action: 'unknown-active-model', needsSwitch: false, reason: `${want.reason}; the active main-session model is unknown, so no switch is recommended` };
   if (desired === active || desired === 'current') return { ...base, action: 'none', needsSwitch: false };
@@ -61,10 +61,18 @@ export const CONFIRMATION = Object.freeze({
   options: ['Yes, switch to Sonnet.', 'No, continue with Opus.'],
   question: 'Main session saat ini menggunakan Opus. Task ini termasuk pekerjaan yang direkomendasikan menggunakan Sonnet agar lebih efisien. Apakah Anda ingin mengganti model ke Sonnet terlebih dahulu?',
 });
+// The question names the detected task category as the reason, so the suggestion explains itself. Without a category it keeps the
+// generic wording (never an invented reason).
+export function questionFor(plan) {
+  const to = cap(plan.desiredModel), from = cap(plan.activeModel), cat = plan.category;
+  if (plan.activeModel === 'opus' && plan.desiredModel === 'sonnet')
+    return cat ? CONFIRMATION.question.replace('Task ini termasuk', `Task ini terdeteksi sebagai ${cat}, termasuk`) : CONFIRMATION.question;
+  return `Main session saat ini menggunakan ${from}. Task ini ${cat ? `terdeteksi sebagai ${cat} dan ` : ''}direkomendasikan menggunakan ${to}. Apakah Anda ingin mengganti model ke ${to} terlebih dahulu?`;
+}
 export function sessionHint(plan) {
   if (!plan || plan.action !== 'recommend-user-switch') return null;
   const to = cap(plan.desiredModel), from = cap(plan.activeModel);
-  const q = plan.activeModel === 'opus' && plan.desiredModel === 'sonnet' ? CONFIRMATION.question : `Main session saat ini menggunakan ${from}. Task ini direkomendasikan menggunakan ${to}. Apakah Anda ingin mengganti model ke ${to} terlebih dahulu?`;
+  const q = questionFor(plan);
   const opts = plan.activeModel === 'opus' && plan.desiredModel === 'sonnet' ? CONFIRMATION.options : [`Yes, switch to ${to}.`, `No, continue with ${from}.`];
   return `RM Context main-session model: this is ${plan.reason}; ${to} is recommended, the active model is ${from}. BEFORE starting the task, ask the user once (AskUserQuestion, two options "${opts[0]}" / "${opts[1]}"): "${q}" On Yes: tell the user to type /model ${plan.desiredModel} (RM Context cannot do it for you; never claim it switched), then wait for their confirmation before implementing. On No: continue on ${from} and do not ask again for this task or its subtasks. Do NOT spawn an agent just to get a different model.`;
 }
